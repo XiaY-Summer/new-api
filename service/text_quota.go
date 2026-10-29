@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -461,6 +462,21 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
+	}
+
+	// TOKEN PLAN：按 token 计量（加权模式下乘模型倍率），累加到套餐总额度与两个窗口。
+	// 计量失败只记日志，不影响已经返回给用户的结果。
+	if relayInfo.TokenPlanId > 0 {
+		modelRatio := summary.ModelRatio
+		if modelRatio <= 0 {
+			// 套餐请求在预扣阶段跳过了定价计算，PriceData 未填充，这里直接取模型倍率。
+			modelRatio, _, _ = ratio_setting.GetModelRatio(relayInfo.GetBillingModelName())
+		}
+		if err := model.RecordUsage(relayInfo.UserId, relayInfo.TokenPlanId,
+			summary.PromptTokens+summary.CompletionTokens,
+			modelRatio, relayInfo.TokenPlanMetering); err != nil {
+			logger.LogError(ctx, common.LogText("failed to record token plan usage: %s", err.Error()))
+		}
 	}
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {

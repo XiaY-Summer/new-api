@@ -56,6 +56,14 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 	}
 	info.SetEstimatePromptTokens(tokens)
 
+	// TOKEN PLAN 专用密钥：不计钱包/订阅，只按 token 计量。
+	// 保留上面的 token 估算，上游未返回 usage 时仍需用它兜底。
+	if tokenPlanId := common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId); tokenPlanId > 0 {
+		info.TokenPlanId = tokenPlanId
+		info.TokenPlanMetering = common.GetContextKeyString(c, constant.ContextKeyTokenPlanMetering)
+		return nil
+	}
+
 	priceData, err := helper.ModelPriceHelper(c, info, tokens, meta)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))

@@ -72,6 +72,8 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.RouteTag("relay"))
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
+	// TOKEN PLAN 专用密钥的额度闸门：必须在选渠道与预扣之前拦下超额请求。
+	relayV1Router.Use(middleware.TokenPlanGuard())
 	{
 		// Responses WebSocket route. Channel selection happens after the first
 		// response.create event; each event runs the ordinary request limiter.
