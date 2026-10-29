@@ -7367,6 +7367,8 @@
     "Key reset successfully": "Key reset successfully",
     "Total quota": "Total quota",
     "Plans": "Plans",
+    "Change plan": "Change plan",
+    "Switching plans cancels the current one immediately. Unused quota is not carried over.": "Switching plans cancels the current one immediately. Unused quota is not carried over.",
     "TOKEN PLAN": "TOKEN PLAN",
     "{{duration}} window": "{{duration}} window",
     "Rolling from first use": "Rolling from first use",

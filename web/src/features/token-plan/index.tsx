@@ -17,10 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { Dialog } from '@/components/dialog'
 import { SectionPageLayout } from '@/components/layout'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
@@ -35,13 +39,15 @@ import { AvailableModels } from './components/available-models'
 import { DedicatedKeyCard } from './components/dedicated-key-card'
 import { PlanCards } from './components/plan-cards'
 import { QuotaWindows } from './components/quota-windows'
-import { formatNumber, formatUnixTime } from './lib/format'
+import { formatUnixTime } from './lib/format'
 
 const QUERY_KEY = ['token-plan']
 
 export function TokenPlan() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  // 已订阅时套餐列表收进弹窗，避免把在售套餐和当前套餐混在一起。
+  const [plansOpen, setPlansOpen] = useState(false)
 
   const plansQuery = useQuery({
     queryKey: [...QUERY_KEY, 'plans'],
@@ -78,6 +84,8 @@ export function TokenPlan() {
     },
     onSuccess: () => {
       toast.success(t('Subscribed successfully'))
+      // 购买后关闭弹窗，页面回到「已订阅」视图。
+      setPlansOpen(false)
       invalidate()
     },
     onError: (error) => handleServerError(error, t('Subscription failed')),
@@ -116,6 +124,23 @@ export function TokenPlan() {
     return null
   })()
 
+  const planCards = plansQuery.isLoading ? (
+    <div className='grid gap-4 md:grid-cols-3'>
+      <Skeleton className='h-64 w-full' />
+      <Skeleton className='h-64 w-full' />
+      <Skeleton className='h-64 w-full' />
+    </div>
+  ) : (
+    <PlanCards
+      plans={plansQuery.data ?? []}
+      currentPlanId={self?.subscription?.plan_id}
+      purchasingId={
+        purchaseMutation.isPending ? purchaseMutation.variables : undefined
+      }
+      onPurchase={(planId) => purchaseMutation.mutate(planId)}
+    />
+  )
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>TOKEN PLAN</SectionPageLayout.Title>
@@ -131,39 +156,25 @@ export function TokenPlan() {
                   {t('Expires at')} {formatUnixTime(self.subscription.end_time)}
                 </span>
               </div>
-              <div className='text-muted-foreground'>
-                {t('Total quota')}:{' '}
-                <span className='text-foreground font-medium tabular-nums'>
-                  {formatNumber(self.subscription.used_tokens)}
-                </span>{' '}
-                / {formatNumber(self.subscription.total_tokens)}
-              </div>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => setPlansOpen(true)}
+              >
+                <RefreshCw className='h-3.5 w-3.5' />
+                {t('Change plan')}
+              </Button>
             </div>
           ) : null}
 
           {windowsSection}
 
-          <div>
-            <h3 className='mb-2 text-sm font-semibold'>{t('Plans')}</h3>
-            {plansQuery.isLoading ? (
-              <div className='grid gap-4 md:grid-cols-3'>
-                <Skeleton className='h-64 w-full' />
-                <Skeleton className='h-64 w-full' />
-                <Skeleton className='h-64 w-full' />
-              </div>
-            ) : (
-              <PlanCards
-                plans={plansQuery.data ?? []}
-                currentPlanId={self?.subscription?.plan_id}
-                purchasingId={
-                  purchaseMutation.isPending
-                    ? purchaseMutation.variables
-                    : undefined
-                }
-                onPurchase={(planId) => purchaseMutation.mutate(planId)}
-              />
-            )}
-          </div>
+          {hasPlan ? null : (
+            <div>
+              <h3 className='mb-2 text-sm font-semibold'>{t('Plans')}</h3>
+              {planCards}
+            </div>
+          )}
 
           {hasPlan ? (
             <>
@@ -179,6 +190,18 @@ export function TokenPlan() {
             </>
           ) : null}
         </div>
+
+        <Dialog
+          open={plansOpen}
+          onOpenChange={setPlansOpen}
+          title={t('Change plan')}
+          description={t(
+            'Switching plans cancels the current one immediately. Unused quota is not carried over.'
+          )}
+          contentClassName='sm:max-w-5xl'
+        >
+          {planCards}
+        </Dialog>
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

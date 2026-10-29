@@ -7367,6 +7367,8 @@
     "Key reset successfully": "密钥已重置",
     "Total quota": "总额度",
     "Plans": "套餐",
+    "Change plan": "更换套餐",
+    "Switching plans cancels the current one immediately. Unused quota is not carried over.": "切换套餐会立即作废当前套餐，剩余额度不保留。",
     "TOKEN PLAN": "TOKEN PLAN",
     "{{duration}} window": "{{duration}} 窗口",
     "Rolling from first use": "从首次使用开始计时",
