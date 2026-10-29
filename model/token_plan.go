@@ -246,15 +246,52 @@ func (p *UserTokenPlan) IsExpired(now int64) bool {
 	return p.Status != TokenPlanStatusActive || (p.EndTime > 0 && p.EndTime <= now)
 }
 
+// TokenPlanUsageDetail 描述一次请求的 token 构成，供加权折算使用。
+// 输入 token 拆成「未命中缓存 / 命中缓存 / 写入缓存」三段，各自套用对应倍率：
+// 缓存命中通常远低于原价（OpenAI 0.5x、Claude 0.1x），缓存写入则略高于原价
+// （Claude 1.25x）。倍率缺失时按 1 处理，此时结果与
+// 「(prompt + completion) × model_ratio」完全等价。
+type TokenPlanUsageDetail struct {
+	PromptTokens        int     // 未命中缓存的输入 token
+	CacheTokens         int     // 命中缓存的输入 token
+	CacheCreationTokens int     // 写入缓存的输入 token
+	CompletionTokens    int     // 输出 token
+	ModelRatio          float64 // 模型倍率
+	CacheRatio          float64 // 缓存命中倍率
+	CacheCreationRatio  float64 // 缓存写入倍率
+}
+
+// TotalTokens 返回本次请求的原始 token 总量（不做加权）。
+func (d TokenPlanUsageDetail) TotalTokens() int {
+	return d.PromptTokens + d.CacheTokens + d.CacheCreationTokens + d.CompletionTokens
+}
+
+// normalizeRatio 把非法或未配置的倍率归一为 1（即不打折）。
+func normalizeRatio(ratio float64) float64 {
+	if ratio <= 0 || math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+		return 1
+	}
+	return ratio
+}
+
 // WeightedTokens 按计量模式折算本次请求消耗的 token。
-func WeightedTokens(tokens int, modelRatio float64, meteringMode string) int64 {
-	if tokens <= 0 {
+// raw 模式或模型倍率缺失时退化为原始计数，此时仍会把缓存 token 计入总量。
+func WeightedTokens(detail TokenPlanUsageDetail, meteringMode string) int64 {
+	total := detail.TotalTokens()
+	if total <= 0 {
 		return 0
 	}
-	if meteringMode == TokenPlanMeteringRaw || modelRatio <= 0 {
-		return int64(tokens)
+	if meteringMode == TokenPlanMeteringRaw || detail.ModelRatio <= 0 {
+		return int64(total)
 	}
-	return int64(math.Round(float64(tokens) * modelRatio))
+	weighted := float64(detail.PromptTokens + detail.CompletionTokens)
+	if detail.CacheTokens > 0 {
+		weighted += float64(detail.CacheTokens) * normalizeRatio(detail.CacheRatio)
+	}
+	if detail.CacheCreationTokens > 0 {
+		weighted += float64(detail.CacheCreationTokens) * normalizeRatio(detail.CacheCreationRatio)
+	}
+	return int64(math.Round(weighted * detail.ModelRatio))
 }
 
 // ---- 查询 ----
@@ -316,8 +353,8 @@ func GetUserTokenPlanById(id int) (*UserTokenPlan, error) {
 // RecordUsage 累加一次请求的加权 token 消耗。
 // 单事务内完成：锁行 → 窗口翻篇则清零 → 累加 → 首次写入锚点。
 // 调用方（结算流程）应容忍错误：计量失败不应影响已经返回给用户的结果。
-func RecordUsage(userId int, planId int, tokens int, modelRatio float64, meteringMode string) error {
-	delta := WeightedTokens(tokens, modelRatio, meteringMode)
+func RecordUsage(userId int, planId int, detail TokenPlanUsageDetail, meteringMode string) error {
+	delta := WeightedTokens(detail, meteringMode)
 	if delta <= 0 || planId <= 0 {
 		return nil
 	}

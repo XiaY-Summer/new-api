@@ -62,6 +62,9 @@ type textQuotaSummary struct {
 	CacheCreationRatio12h  float64
 	Quota                  int
 	IsClaudeUsageSemantic  bool
+	// CacheTokensSeparate 表示缓存 token 独立于 PromptTokens 上报（Claude 语义）。
+	// OpenAI / Gemini 语义下 prompt_tokens 已包含缓存部分，计量时需要剥离。
+	CacheTokensSeparate    bool
 	UsageSemantic          string
 	AudioInputPrice        float64
 	ToolSurchargeItems     []ToolSurchargeItem
@@ -90,6 +93,38 @@ func cacheWriteTokensTotal(summary textQuotaSummary) int {
 		return splitCacheWriteTokens
 	}
 	return summary.CacheCreationTokens
+}
+
+// tokenPlanUsageDetail 把本次请求的 token 拆成「非缓存输入 / 缓存命中 / 缓存写入 / 输出」四段，
+// 供 TOKEN PLAN 按各自倍率加权。
+//
+// 两种上报语义对缓存的处理相反：OpenAI / Gemini 的 prompt_tokens 已包含缓存命中，
+// 需要减出来；Claude 的 input_tokens 不含缓存，缓存单列，直接使用即可。
+func (s *textQuotaSummary) tokenPlanUsageDetail(modelRatio, cacheRatio, cacheCreationRatio float64) model.TokenPlanUsageDetail {
+	cacheTokens := s.CacheTokens
+	if cacheTokens < 0 {
+		cacheTokens = 0
+	}
+	cacheCreationTokens := cacheWriteTokensTotal(*s)
+	if cacheCreationTokens < 0 {
+		cacheCreationTokens = 0
+	}
+	promptTokens := s.PromptTokens
+	if !s.CacheTokensSeparate {
+		promptTokens -= cacheTokens + cacheCreationTokens
+	}
+	if promptTokens < 0 {
+		promptTokens = 0
+	}
+	return model.TokenPlanUsageDetail{
+		PromptTokens:        promptTokens,
+		CacheTokens:         cacheTokens,
+		CacheCreationTokens: cacheCreationTokens,
+		CompletionTokens:    s.CompletionTokens,
+		ModelRatio:          modelRatio,
+		CacheRatio:          cacheRatio,
+		CacheCreationRatio:  cacheCreationRatio,
+	}
 }
 
 func isLegacyClaudeDerivedOpenAIUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
@@ -264,6 +299,7 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 	summary.ImageTokens = usage.PromptTokensDetails.ImageTokens
 	summary.AudioTokens = usage.PromptTokensDetails.AudioTokens
 	legacyClaudeDerived := isLegacyClaudeDerivedOpenAIUsage(relayInfo, usage)
+	summary.CacheTokensSeparate = summary.IsClaudeUsageSemantic || legacyClaudeDerived
 	if !summary.IsClaudeUsageSemantic && !legacyClaudeDerived {
 		summary.CacheCreationTokens12h = usage.PromptTokensDetails.CacheWrite12hTokens()
 	}
@@ -465,16 +501,23 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	// TOKEN PLAN：按 token 计量（加权模式下乘模型倍率），累加到套餐总额度与两个窗口。
+	// 缓存命中与缓存写入走各自的倍率——两者上游单价与普通输入不同，按原价计会失真。
 	// 计量失败只记日志，不影响已经返回给用户的结果。
 	if relayInfo.TokenPlanId > 0 {
-		modelRatio := summary.ModelRatio
-		if modelRatio <= 0 {
-			// 套餐请求在预扣阶段跳过了定价计算，PriceData 未填充，这里直接取模型倍率。
-			modelRatio, _, _ = ratio_setting.GetModelRatio(relayInfo.GetBillingModelName())
+		billingModel := relayInfo.GetBillingModelName()
+		// 套餐请求在预扣阶段跳过了定价计算，PriceData 未填充，倍率需要回查模型配置。
+		// 回填到 summary 上，消费日志里的 model_ratio / cache_ratio 才不会显示为 0。
+		if summary.ModelRatio <= 0 {
+			summary.ModelRatio, _, _ = ratio_setting.GetModelRatio(billingModel)
 		}
-		if err := model.RecordUsage(relayInfo.UserId, relayInfo.TokenPlanId,
-			summary.PromptTokens+summary.CompletionTokens,
-			modelRatio, relayInfo.TokenPlanMetering); err != nil {
+		if summary.CacheRatio <= 0 {
+			summary.CacheRatio, _ = ratio_setting.GetCacheRatio(billingModel)
+		}
+		if summary.CacheCreationRatio <= 0 {
+			summary.CacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(billingModel)
+		}
+		detail := summary.tokenPlanUsageDetail(summary.ModelRatio, summary.CacheRatio, summary.CacheCreationRatio)
+		if err := model.RecordUsage(relayInfo.UserId, relayInfo.TokenPlanId, detail, relayInfo.TokenPlanMetering); err != nil {
 			logger.LogError(ctx, common.LogText("failed to record token plan usage: %s", err.Error()))
 		}
 	}

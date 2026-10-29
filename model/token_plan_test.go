@@ -78,19 +78,71 @@ func TestBuildWindowViewPercentAndExhausted(t *testing.T) {
 func TestWeightedTokens(t *testing.T) {
 	cases := []struct {
 		name   string
-		tokens int
-		ratio  float64
+		detail TokenPlanUsageDetail
 		mode   string
 		want   int64
 	}{
-		{"weighted by model ratio", 1000, 1.25, TokenPlanMeteringWeighted, 1250},
-		{"weighted rounds half up", 3, 0.5, TokenPlanMeteringWeighted, 2},
-		{"raw ignores ratio", 1000, 15, TokenPlanMeteringRaw, 1000},
-		{"unknown ratio falls back to raw", 1000, 0, TokenPlanMeteringWeighted, 1000},
-		{"zero tokens", 0, 1.25, TokenPlanMeteringWeighted, 0},
+		{
+			name:   "weighted by model ratio",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CompletionTokens: 400, ModelRatio: 1.25, CacheRatio: 1},
+			mode:   TokenPlanMeteringWeighted,
+			want:   1250,
+		},
+		{
+			name:   "weighted rounds half up",
+			detail: TokenPlanUsageDetail{PromptTokens: 3, ModelRatio: 0.5, CacheRatio: 1},
+			mode:   TokenPlanMeteringWeighted,
+			want:   2,
+		},
+		{
+			name:   "raw ignores ratio",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CompletionTokens: 400, ModelRatio: 15, CacheRatio: 1},
+			mode:   TokenPlanMeteringRaw,
+			want:   1000,
+		},
+		{
+			name:   "unknown ratio falls back to raw",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CompletionTokens: 400, ModelRatio: 0},
+			mode:   TokenPlanMeteringWeighted,
+			want:   1000,
+		},
+		{
+			name:   "zero tokens",
+			detail: TokenPlanUsageDetail{ModelRatio: 1.25},
+			mode:   TokenPlanMeteringWeighted,
+			want:   0,
+		},
+		{
+			// 缓存命中按 0.5 折：600×2.5 + 400×0.5×2.5 + 200×2.5 = 1500 + 500 + 500
+			name:   "cache hit discounted",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CacheTokens: 400, CompletionTokens: 200, ModelRatio: 2.5, CacheRatio: 0.5},
+			mode:   TokenPlanMeteringWeighted,
+			want:   2500,
+		},
+		{
+			// 缓存写入按 1.25 倍：600×2.5 + 400×1.25×2.5 = 1500 + 1250
+			name:   "cache creation premium",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CacheCreationTokens: 400, ModelRatio: 2.5, CacheCreationRatio: 1.25},
+			mode:   TokenPlanMeteringWeighted,
+			want:   2750,
+		},
+		{
+			// 倍率缺失时按 1 处理，等价于全价计
+			name:   "missing cache ratios default to full price",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CacheTokens: 400, ModelRatio: 2.5},
+			mode:   TokenPlanMeteringWeighted,
+			want:   2500,
+		},
+		{
+			// raw 模式仍应把缓存 token 计入总量
+			name:   "raw counts cache tokens",
+			detail: TokenPlanUsageDetail{PromptTokens: 600, CacheTokens: 300, CacheCreationTokens: 100, ModelRatio: 2.5, CacheRatio: 0.5},
+			mode:   TokenPlanMeteringRaw,
+			want:   1000,
+		},
 	}
 	for _, tc := range cases {
-		if got := WeightedTokens(tc.tokens, tc.ratio, tc.mode); got != tc.want {
+		if got := WeightedTokens(tc.detail, tc.mode); got != tc.want {
 			t.Errorf("%s: WeightedTokens() = %d, want %d", tc.name, got, tc.want)
 		}
 	}

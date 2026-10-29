@@ -1705,3 +1705,121 @@ func TestPostTextConsumeQuotaLogsMissingUsageAsStructuredContent(t *testing.T) {
 		map[string]any{"key": "Upstream returned no usage, so nothing was charged (possibly an upstream timeout)"},
 	}, other["content_parts"])
 }
+
+// TestTokenPlanUsageDetailCountsCacheTokens 覆盖 TOKEN PLAN 计量对缓存 token 的处理。
+//
+// 两种上报语义对缓存的表述相反：OpenAI / Gemini 的 prompt_tokens 已含缓存命中，
+// Claude 的 input_tokens 不含。两者必须折算成同一份「非缓存输入 / 缓存命中 /
+// 缓存写入 / 输出」四段式明细，否则 Claude 请求的缓存部分会被整段漏计。
+func TestTokenPlanUsageDetailCountsCacheTokens(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	priceData := hosttypes.PriceData{
+		ModelRatio:         2.5,
+		CompletionRatio:    1,
+		CacheRatio:         0.1,
+		CacheCreationRatio: 1.25,
+		GroupRatioInfo:     hosttypes.GroupRatioInfo{GroupRatio: 1},
+	}
+
+	openAIRelayInfo := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "gpt-5.1",
+		PriceData:       priceData,
+		StartTime:       time.Now(),
+	}
+	claudeRelayInfo := &relaycommon.RelayInfo{
+		RelayFormat:             types.RelayFormatClaude,
+		FinalRequestRelayFormat: types.RelayFormatClaude,
+		OriginModelName:         "claude-3-7-sonnet",
+		PriceData:               priceData,
+		StartTime:               time.Now(),
+	}
+
+	// OpenAI：prompt_tokens 含缓存命中，需剥离；缓存写入同理。
+	openAIUsage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 200,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:     400,
+			CacheWriteTokens: 100,
+		},
+	}
+	// Claude：input_tokens 不含缓存，缓存单列，直接使用。
+	claudeUsage := &dto.Usage{
+		PromptTokens:     500,
+		CompletionTokens: 200,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         400,
+			CachedCreationTokens: 100,
+		},
+	}
+
+	openAISummary := calculateTextQuotaSummary(ctx, openAIRelayInfo, openAIUsage)
+	claudeSummary := calculateTextQuotaSummary(ctx, claudeRelayInfo, claudeUsage)
+
+	openAIDetail := openAISummary.tokenPlanUsageDetail(2.5, 0.1, 1.25)
+	claudeDetail := claudeSummary.tokenPlanUsageDetail(2.5, 0.1, 1.25)
+
+	require.Equal(t, model.TokenPlanUsageDetail{
+		PromptTokens:        500,
+		CacheTokens:         400,
+		CacheCreationTokens: 100,
+		CompletionTokens:    200,
+		ModelRatio:          2.5,
+		CacheRatio:          0.1,
+		CacheCreationRatio:  1.25,
+	}, openAIDetail)
+	require.Equal(t, openAIDetail, claudeDetail, "两种语义必须折算成同一份明细")
+
+	// 原始总量：500 + 400 + 100 + 200
+	require.Equal(t, 1200, openAIDetail.TotalTokens())
+
+	// 加权：(500+200)×2.5 + 400×0.1×2.5 + 100×1.25×2.5 = 1750 + 100 + 312.5 = 2162.5 => 2163
+	require.Equal(t, int64(2163), model.WeightedTokens(openAIDetail, model.TokenPlanMeteringWeighted))
+
+	// raw 模式仍计入全部 token
+	require.Equal(t, int64(1200), model.WeightedTokens(openAIDetail, model.TokenPlanMeteringRaw))
+
+	// 缓存倍率缺失时按全价，等价于 (prompt+cache+creation+completion)×modelRatio
+	fullPrice := openAISummary.tokenPlanUsageDetail(2.5, 0, 0)
+	require.Equal(t, int64(3000), model.WeightedTokens(fullPrice, model.TokenPlanMeteringWeighted))
+}
+
+// TestTokenPlanUsageDetailIgnoresCacheWithoutClaudeSemantic 确认非 Claude 语义下
+// 不会把缓存 token 重复计入（prompt_tokens 已经包含它们）。
+func TestTokenPlanUsageDetailIgnoresCacheWithoutClaudeSemantic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAI,
+		OriginModelName: "gpt-5.1",
+		PriceData: hosttypes.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			CacheRatio:      0.5,
+			GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+	usage := &dto.Usage{
+		PromptTokens:     1000,
+		CompletionTokens: 100,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 300,
+		},
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+	detail := summary.tokenPlanUsageDetail(1, 0.5, 1.25)
+
+	require.Equal(t, 700, detail.PromptTokens)
+	require.Equal(t, 300, detail.CacheTokens)
+	require.Equal(t, 1100, detail.TotalTokens(), "总量必须与原始 prompt+completion 一致")
+	// 700 + 300×0.5 + 100 = 950
+	require.Equal(t, int64(950), model.WeightedTokens(detail, model.TokenPlanMeteringWeighted))
+}
