@@ -104,9 +104,15 @@ export function TokenPlans() {
       if (!result.success) {
         throw createServerError(result, t('Failed to delete the plan'))
       }
-      toast.success(t('Plan deleted'))
+      toast.success(
+        t('Plan deleted, {{count}} subscription(s) cancelled', {
+          count: result.data?.cancelled ?? 0,
+        })
+      )
       setDeleting(null)
       refresh()
+      // 删除会取消存量订阅，订阅者列表也要刷新。
+      queryClient.invalidateQueries({ queryKey: SUBSCRIBERS_QUERY_KEY })
     } catch (error) {
       handleServerError(error, t('Failed to delete the plan'))
     } finally {
@@ -457,7 +463,7 @@ export function TokenPlans() {
         onOpenChange={(open) => !open && setDeleting(null)}
         title={t('Delete plan')}
         desc={t(
-          'Deleting a plan does not affect users who already subscribed to it, but it can no longer be purchased.'
+          'Deleting a plan cancels every active subscription of it immediately, and their dedicated keys stop working. To stop selling without affecting existing subscribers, switch the plan off instead.'
         )}
         confirmText={t('Delete')}
         destructive

@@ -803,6 +803,41 @@ func SyncTokenPlanThrottle(planId int) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
+// DeleteTokenPlan 删除套餐模板，并把该套餐所有生效中的订阅一并置为 cancelled。
+//
+// 与「下架」（Enabled=false）严格区分：下架只影响新购买，已订阅用户照常使用；
+// 删除是不可逆的，必须连存量订阅一起取消——否则用户手里会留下一条指向已删除
+// 套餐的记录，还在正常消耗额度。
+//
+// 取消订阅后，其专用 key 仍然绑在 cancelled 的记录上，TokenPlanGuard 会按
+// 「套餐已过期」拒绝请求。这里绝不能去清空 tokens.token_plan_id：那会让这把
+// unlimited_quota 的 key 退化成普通无限额密钥，等于免费放行。
+func DeleteTokenPlan(planId int) (int64, error) {
+	if _, err := GetTokenPlanById(planId); err != nil {
+		return 0, errors.New("套餐不存在")
+	}
+
+	now := common.GetTimestamp()
+	var cancelled int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&UserTokenPlan{}).
+			Where("plan_id = ? AND status = ?", planId, TokenPlanStatusActive).
+			Updates(map[string]any{
+				"status":       TokenPlanStatusCancelled,
+				"updated_time": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		cancelled = result.RowsAffected
+		return tx.Delete(&TokenPlan{}, planId).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	return cancelled, nil
+}
+
 // CountThrottleDriftByPlan 返回「节流参数与套餐模板不一致的生效订阅数」，按套餐 id 聚合。
 //
 // 节流参数是快照语义：管理员改模板后，已订阅用户要显式调用 SyncTokenPlanThrottle

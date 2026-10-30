@@ -45,7 +45,10 @@ export async function updateTokenPlan(
   return res.data
 }
 
-export async function deleteTokenPlan(id: number): Promise<ApiResponse> {
+/** 删除套餐会同时取消该套餐所有生效中的订阅，返回被取消的数量。 */
+export async function deleteTokenPlan(
+  id: number
+): Promise<ApiResponse<{ cancelled: number }>> {
   const res = await api.delete(`/api/token-plan/admin/plans/${id}`)
   return res.data
 }

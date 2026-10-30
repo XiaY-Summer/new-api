@@ -425,17 +425,20 @@ func AdminUpdateTokenPlan(c *gin.Context) {
 	common.ApiSuccess(c, newTokenPlanView(updated))
 }
 
+// AdminDeleteTokenPlan 删除套餐模板，同时取消该套餐所有生效中的订阅。
+// 只是「下架」（enabled=false）不会影响已订阅用户，两者的语义必须分开。
 func AdminDeleteTokenPlan(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	if id <= 0 {
 		common.ApiErrorT(c, "Invalid ID")
 		return
 	}
-	if err := model.DB.Delete(&model.TokenPlan{}, id).Error; err != nil {
+	cancelled, err := model.DeleteTokenPlan(id)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, nil)
+	common.ApiSuccess(c, gin.H{"cancelled": cancelled})
 }
 
 // AdminSyncTokenPlanThrottle 把套餐模板当前的节流参数推送到该套餐所有生效中的订阅。
