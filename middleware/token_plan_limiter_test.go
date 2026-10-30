@@ -1,10 +1,17 @@
 package middleware
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,27 +25,30 @@ const (
 )
 
 func TestTokenPlanConcurrencyAcquire(t *testing.T) {
+	previousRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = previousRedis })
 	sub := &model.UserTokenPlan{Id: concTestPlanId}
 
 	// limit <= 0 表示不限：返回可调用的空函数，而不是 nil（nil 表示已满）。
-	if release := tokenPlanConcurrencyAcquire(sub, 0); release == nil {
+	if release := tokenPlanConcurrencyAcquire(sub, 0, nil); release == nil {
 		t.Fatal("limit 0 should be unlimited, got nil release")
 	} else {
 		release()
 	}
 
-	release1 := tokenPlanConcurrencyAcquire(sub, 2)
-	release2 := tokenPlanConcurrencyAcquire(sub, 2)
+	release1 := tokenPlanConcurrencyAcquire(sub, 2, nil)
+	release2 := tokenPlanConcurrencyAcquire(sub, 2, nil)
 	if release1 == nil || release2 == nil {
 		t.Fatal("first two acquisitions should succeed with limit 2")
 	}
-	if release := tokenPlanConcurrencyAcquire(sub, 2); release != nil {
+	if release := tokenPlanConcurrencyAcquire(sub, 2, nil); release != nil {
 		t.Fatal("third acquisition should be rejected with limit 2")
 	}
 
 	// 释放一个后应能再进一个。
 	release1()
-	if release := tokenPlanConcurrencyAcquire(sub, 2); release == nil {
+	if release := tokenPlanConcurrencyAcquire(sub, 2, nil); release == nil {
 		t.Fatal("slot should be reusable after release")
 	} else {
 		release()
@@ -47,7 +57,7 @@ func TestTokenPlanConcurrencyAcquire(t *testing.T) {
 	// 重复释放不能把计数减成负数（Complete 内部有 sync.Once）。
 	release1()
 	release1()
-	release3 := tokenPlanConcurrencyAcquire(sub, 2)
+	release3 := tokenPlanConcurrencyAcquire(sub, 2, nil)
 	if release3 == nil {
 		t.Fatal("double release must not free extra slots")
 	}
@@ -56,14 +66,56 @@ func TestTokenPlanConcurrencyAcquire(t *testing.T) {
 
 	// 不同套餐实例互不影响。
 	other := &model.UserTokenPlan{Id: concOtherPlanId}
-	releaseOther := tokenPlanConcurrencyAcquire(other, 1)
+	releaseOther := tokenPlanConcurrencyAcquire(other, 1, nil)
 	if releaseOther == nil {
 		t.Fatal("other plan should have its own slot")
 	}
 	releaseOther()
 }
 
+func TestTokenPlanRedisConcurrencyLeasesAndRateFailure(t *testing.T) {
+	server := miniredis.RunT(t)
+	previousEnabled, previousClient := common.RedisEnabled, common.RDB
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.RedisEnabled, common.RDB = true, client
+	t.Cleanup(func() {
+		common.RedisEnabled, common.RDB = previousEnabled, previousClient
+		require.NoError(t, client.Close())
+	})
+	newContext := func() *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		return c
+	}
+	sub := &model.UserTokenPlan{Id: 9_100_006}
+	first := tokenPlanConcurrencyAcquire(sub, 1, newContext())
+	require.NotNil(t, first)
+	assert.Nil(t, tokenPlanConcurrencyAcquire(sub, 1, newContext()), "a second worker must observe the shared lease")
+	server.SetTime(time.Now().Add(6 * time.Minute))
+	second := tokenPlanConcurrencyAcquire(sub, 1, newContext())
+	require.NotNil(t, second, "a crashed worker's lease must expire")
+	first()
+	first()
+	assert.Nil(t, tokenPlanConcurrencyAcquire(sub, 1, newContext()), "releasing an old lease must not release its replacement")
+	second()
+	third := tokenPlanConcurrencyAcquire(sub, 1, newContext())
+	require.NotNil(t, third)
+	third()
+	throttle := model.TokenPlanThrottle{RateLimitCount: 1, RateLimitWindowSeconds: 60}
+	allowed, _ := tokenPlanRateAllow(newContext(), sub, throttle)
+	assert.True(t, allowed)
+	allowed, _ = tokenPlanRateAllow(newContext(), sub, throttle)
+	assert.False(t, allowed)
+	common.RDB = nil
+	allowed, _ = tokenPlanRateAllow(newContext(), sub, throttle)
+	assert.False(t, allowed, "unavailable Redis must not bypass paid-plan limits")
+	assert.Nil(t, tokenPlanConcurrencyAcquire(sub, 1, newContext()))
+}
+
 func TestTokenPlanRateAllow(t *testing.T) {
+	previousRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = previousRedis })
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 

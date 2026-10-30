@@ -152,9 +152,13 @@ type RelayInfo struct {
 	SubscriptionPlanId    int
 	SubscriptionPlanTitle string
 	// TokenPlanId 非零表示本次请求由 TOKEN PLAN 专用密钥发起：跳过钱包/订阅计费，
-	// 改由 PostTextConsumeQuota 按 token 计量（TokenPlanMetering 决定是否按模型倍率加权）。
-	TokenPlanId       int
-	TokenPlanMetering string
+	// 改由文本/音频结算按 token 计量（TokenPlanMetering 决定是否按模型倍率加权）。
+	TokenPlanId          int
+	TokenPlanMetering    string
+	TokenPlanRequestId   string
+	TokenPlanPreConsumed int64
+	TokenPlanConsumed    int64
+	TokenPlanRates       hosttypes.PriceData
 	// FirstByteDelayGate 非 nil 表示本次请求需要在写第一个字节前延迟一次。
 	// 由 PrepareRequestBilling 一次性掷骰子决定，重试不会重新掷、也不会重复延迟。
 	FirstByteDelayGate *FirstByteDelayGate

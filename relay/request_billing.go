@@ -9,9 +9,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -26,8 +28,15 @@ import (
 // channel retries retain the resulting billing session and pricing snapshot.
 func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	tokenPlanId := common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId)
+	if tokenPlanId > 0 {
+		switch info.RelayMode {
+		case relayconstant.RelayModeAlphaSearch, relayconstant.RelayModeToolsSearch, relayconstant.RelayModeToolsFetch, relayconstant.RelayModeRealtime:
+			return types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgTokenPlanEndpointUnsupported)), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
+	}
 	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
-	if info.Request != nil && (needSensitiveCheck || constant.CountToken) {
+	if info.Request != nil && (needSensitiveCheck || constant.CountToken || tokenPlanId > 0) {
 		meta = info.Request.GetTokenCountMeta()
 	} else {
 		// Avoid building CombineText when only the pricing quantities are needed.
@@ -52,7 +61,13 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 		}
 	}
 
-	tokens, err := service.EstimateRequestToken(c, meta, info)
+	var tokens int
+	var err error
+	if tokenPlanId > 0 {
+		tokens, err = service.CountRequestToken(c, meta, info)
+	} else {
+		tokens, err = service.EstimateRequestToken(c, meta, info)
+	}
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeCountTokenFailed)
 	}
@@ -60,9 +75,12 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 
 	// TOKEN PLAN 专用密钥：不计钱包/订阅，只按 token 计量。
 	// 保留上面的 token 估算，上游未返回 usage 时仍需用它兜底。
-	if tokenPlanId := common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId); tokenPlanId > 0 {
+	if tokenPlanId > 0 {
 		info.TokenPlanId = tokenPlanId
 		info.TokenPlanMetering = common.GetContextKeyString(c, constant.ContextKeyTokenPlanMetering)
+		if apiErr := service.PrepareTokenPlanBilling(c, info, tokens, meta); apiErr != nil {
+			return apiErr
+		}
 
 		// 首字延迟在这里一次性掷骰子：prompt token 估算刚就绪，且本函数在
 		// controller.Relay 的重试循环之外，重试不会重新掷、也不会叠加延迟。
@@ -93,6 +111,12 @@ func RefundFailedRequestBilling(c *gin.Context, info *relaycommon.RelayInfo, api
 		return nil
 	}
 	apiErr = service.NormalizeViolationFeeError(apiErr)
+	if info.TokenPlanRequestId != "" {
+		if err := model.SettleTokenPlanTokens(info.UserId, info.TokenPlanId, info.TokenPlanRequestId, 0, true); err != nil {
+			logger.LogError(c, common.LogText("failed to refund token plan reservation: %s", err.Error()))
+		}
+		return apiErr
+	}
 	if info.Billing != nil {
 		info.Billing.Refund(c)
 	}

@@ -328,7 +328,8 @@ type UserTokenPlan struct {
 	Window2Index int64 `json:"window2_index" gorm:"type:bigint;not null;default:0"`
 	Window2Used  int64 `json:"window2_used" gorm:"type:bigint;not null;default:0"`
 
-	UsedTokens int64 `json:"used_tokens" gorm:"type:bigint;not null;default:0"`
+	UsedTokens   int64 `json:"used_tokens" gorm:"type:bigint;not null;default:0"`
+	UsageVersion int64 `json:"-" gorm:"type:bigint;not null;default:0"`
 
 	StartTime int64  `json:"start_time" gorm:"type:bigint;not null;default:0"`
 	EndTime   int64  `json:"end_time" gorm:"type:bigint;not null;default:0"`
@@ -447,7 +448,8 @@ type TokenPlanUsageDetail struct {
 
 // TotalTokens 返回本次请求的原始 token 总量（不做加权）。
 func (d TokenPlanUsageDetail) TotalTokens() int {
-	return d.PromptTokens + d.CacheTokens + d.CacheCreationTokens + d.CompletionTokens
+	return common.QuotaRound(float64(max(d.PromptTokens, 0)) + float64(max(d.CacheTokens, 0)) +
+		float64(max(d.CacheCreationTokens, 0)) + float64(max(d.CompletionTokens, 0)))
 }
 
 // normalizeRatio 把非法或未配置的倍率归一为 1（即不打折）。
@@ -461,21 +463,28 @@ func normalizeRatio(ratio float64) float64 {
 // WeightedTokens 按计量模式折算本次请求消耗的 token。
 // raw 模式或模型倍率缺失时退化为原始计数，此时仍会把缓存 token 计入总量。
 func WeightedTokens(detail TokenPlanUsageDetail, meteringMode string) int64 {
-	total := detail.TotalTokens()
-	if total <= 0 {
-		return 0
+	tokens, _ := WeightedTokensChecked(detail, meteringMode)
+	return tokens
+}
+
+// WeightedTokensChecked keeps a single request within the common billing bound
+// and exposes saturation to the request's consume log.
+func WeightedTokensChecked(detail TokenPlanUsageDetail, meteringMode string) (int64, *common.QuotaClamp) {
+	weighted := float64(max(detail.PromptTokens, 0)) + float64(max(detail.CompletionTokens, 0))
+	cache, creation := 1.0, 1.0
+	if meteringMode != TokenPlanMeteringRaw && detail.ModelRatio > 0 {
+		cache, creation = normalizeRatio(detail.CacheRatio), normalizeRatio(detail.CacheCreationRatio)
 	}
-	if meteringMode == TokenPlanMeteringRaw || detail.ModelRatio <= 0 {
-		return int64(total)
+	weighted += float64(max(detail.CacheTokens, 0)) * cache
+	weighted += float64(max(detail.CacheCreationTokens, 0)) * creation
+	if meteringMode != TokenPlanMeteringRaw {
+		weighted *= normalizeRatio(detail.ModelRatio)
 	}
-	weighted := float64(detail.PromptTokens + detail.CompletionTokens)
-	if detail.CacheTokens > 0 {
-		weighted += float64(detail.CacheTokens) * normalizeRatio(detail.CacheRatio)
+	tokens, clamp := common.QuotaRoundChecked(weighted)
+	if weighted > 0 && tokens == 0 {
+		tokens = 1
 	}
-	if detail.CacheCreationTokens > 0 {
-		weighted += float64(detail.CacheCreationTokens) * normalizeRatio(detail.CacheCreationRatio)
-	}
-	return int64(math.Round(weighted * detail.ModelRatio))
+	return int64(tokens), clamp
 }
 
 // ---- 查询 ----
@@ -548,8 +557,8 @@ func RecordUsage(userId int, planId int, detail TokenPlanUsageDetail, meteringMo
 	now := common.GetTimestamp()
 
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var plan UserTokenPlan
-		if err := lockForUpdate(tx).Where("id = ? AND user_id = ?", planId, userId).First(&plan).Error; err != nil {
+		plan, err := lockUserTokenPlan(tx, userId, planId)
+		if err != nil {
 			return err
 		}
 
@@ -611,6 +620,9 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 		return nil, nil, errors.New("套餐已下架")
 	}
 	plan.NormalizeDefaults()
+	if plan.TotalTokens < 0 || plan.TotalTokens > common.MaxWalletQuota || plan.DurationDays > 36500 {
+		return nil, nil, errors.New("Invalid parameters")
+	}
 
 	now := common.GetTimestamp()
 	extendSeconds := int64(plan.DurationDays) * 86400
@@ -619,6 +631,17 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 	var resultToken *Token
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
+		// Lock a stable row even on the first purchase, when no subscription
+		// exists yet. SQLite acquires its write lock before the first read.
+		if err := tx.Model(&User{}).Where("id = ?", userId).
+			UpdateColumn("quota", gorm.Expr("quota")).Error; err != nil {
+			return err
+		}
+		if err := lockForUpdate(tx).Where("id = ? AND enabled = ?", plan.Id, true).First(plan).Error; err != nil {
+			return err
+		}
+		plan.NormalizeDefaults()
+		extendSeconds = int64(plan.DurationDays) * 86400
 		var current UserTokenPlan
 		currentErr := lockForUpdate(tx).
 			Where("user_id = ? AND status = ?", userId, TokenPlanStatusActive).
@@ -632,6 +655,9 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 
 		// 同套餐续费：累加时长与总额度，而不是把到期时间重置成「现在 + 一个月」。
 		if hasCurrent && current.PlanId == plan.Id {
+			if current.TotalTokens > common.MaxWalletQuota-plan.TotalTokens {
+				return errors.New("Invalid parameters")
+			}
 			newEnd := current.EndTime + extendSeconds
 			// 已过期的套餐从当前时间重新起算，否则会累加出「续了费还是过期」的结果。
 			if !stillValid {
@@ -668,8 +694,14 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 		}
 
 		// 降级拦截：当前套餐仍在有效期内且额度更高时不允许被覆盖。
-		if stillValid && current.TotalTokens > plan.TotalTokens {
-			return errors.New("当前套餐额度高于目标套餐，暂不支持降级；如需降级请先联系管理员")
+		if stillValid {
+			var currentTemplate TokenPlan
+			if err := tx.Where("id = ?", current.PlanId).First(&currentTemplate).Error; err != nil {
+				return err
+			}
+			if currentTemplate.TotalTokens > plan.TotalTokens {
+				return errors.New("当前套餐额度高于目标套餐，暂不支持降级；如需降级请先联系管理员")
+			}
 		}
 
 		// 作废旧套餐
@@ -721,7 +753,7 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 // bindTokenPlanKey 复用该用户已有的专用 key（没有则新建），并把它绑定到指定套餐记录。
 func bindTokenPlanKey(tx *gorm.DB, userId int, userPlanId int, now int64) (*Token, error) {
 	var token Token
-	tokenErr := tx.Where("user_id = ? AND token_plan_id IS NOT NULL", userId).Order("id asc").First(&token).Error
+	tokenErr := tx.Unscoped().Where("user_id = ? AND token_plan_id IS NOT NULL", userId).Order("id asc").First(&token).Error
 	if tokenErr != nil && !errors.Is(tokenErr, gorm.ErrRecordNotFound) {
 		return nil, tokenErr
 	}
@@ -748,11 +780,23 @@ func bindTokenPlanKey(tx *gorm.DB, userId int, userPlanId int, now int64) (*Toke
 	}
 	// 旧 key 的缓存必须在写库前失效，否则它在 TTL 内仍会按旧的 token_plan_id 放行。
 	if token.Key != "" {
-		_ = invalidateTokenCacheForMutation(token.Key)
+		if err := invalidateTokenCacheForMutation(token.Key); err != nil {
+			return nil, err
+		}
 	}
 	planIdCopy := userPlanId
-	if err := tx.Model(&Token{}).Where("id = ?", token.Id).
-		Updates(map[string]any{"token_plan_id": planIdCopy, "unlimited_quota": true, "status": common.TokenStatusEnabled}).Error; err != nil {
+	updates := map[string]any{"token_plan_id": planIdCopy, "unlimited_quota": true, "status": common.TokenStatusEnabled}
+	if token.DeletedAt.Valid {
+		newKey, err := GenerateTokenPlanKey()
+		if err != nil {
+			return nil, err
+		}
+		updates["key"], updates["deleted_at"] = newKey, nil
+		token.Key = newKey
+		token.DeletedAt = gorm.DeletedAt{}
+	}
+	if err := tx.Unscoped().Model(&Token{}).Where("id = ?", token.Id).
+		Updates(updates).Error; err != nil {
 		return nil, err
 	}
 	if err := tx.Model(&UserTokenPlan{}).Where("id = ?", userPlanId).
@@ -772,6 +816,7 @@ func ResetTokenPlanUsage(userId int) (int64, error) {
 		query = query.Where("user_id = ?", userId)
 	}
 	result := query.Updates(map[string]any{
+		"usage_version": gorm.Expr("usage_version + 1"),
 		"used_tokens":   0,
 		"window1_used":  0,
 		"window2_used":  0,
@@ -820,6 +865,12 @@ func DeleteTokenPlan(planId int) (int64, error) {
 	now := common.GetTimestamp()
 	var cancelled int64
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Keep the same template -> subscription lock order as purchase.
+		// Otherwise deleting a template while renewing it can deadlock.
+		var plan TokenPlan
+		if err := lockForUpdate(tx).Where("id = ?", planId).First(&plan).Error; err != nil {
+			return err
+		}
 		result := tx.Model(&UserTokenPlan{}).
 			Where("plan_id = ? AND status = ?", planId, TokenPlanStatusActive).
 			Updates(map[string]any{
@@ -911,32 +962,34 @@ func GetTokenPlanSubscribers() ([]*TokenPlanSubscriberView, error) {
 
 // ResetTokenPlanKey 为当前用户重新生成专用 key（原地更新，保持 key id 与套餐绑定不变）。
 func ResetTokenPlanKey(userId int) (*Token, error) {
-	sub, err := GetActiveUserTokenPlan(userId)
-	if err != nil {
-		return nil, err
-	}
-	if sub == nil || sub.TokenId <= 0 {
-		return nil, errors.New("当前没有生效中的 TOKEN PLAN")
-	}
-	// 旧 key 的缓存必须在写库前失效，否则它在 TTL 内仍能通过认证。
-	var old Token
-	if err := DB.Select("id", "key").Where("id = ?", sub.TokenId).First(&old).Error; err == nil {
-		_ = invalidateTokenCacheForMutation(old.Key)
-	}
 	newKey, err := GenerateTokenPlanKey()
 	if err != nil {
 		return nil, err
 	}
-	now := common.GetTimestamp()
-	if err := DB.Model(&Token{}).Where("id = ? AND user_id = ?", sub.TokenId, userId).
-		Updates(map[string]any{"key": newKey, "accessed_time": now}).Error; err != nil {
-		return nil, err
-	}
-	token, err := GetTokenByIds(sub.TokenId, userId)
-	if err != nil {
-		return nil, err
-	}
-	return token, nil
+	var token *Token
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("id = ?", userId).UpdateColumn("quota", gorm.Expr("quota")).Error; err != nil {
+			return err
+		}
+		var sub UserTokenPlan
+		if err := lockForUpdate(tx).Where("user_id = ? AND status = ? AND end_time > ?", userId, TokenPlanStatusActive, common.GetTimestamp()).Order("id desc").First(&sub).Error; err != nil {
+			return err
+		}
+		var err error
+		token, err = bindTokenPlanKey(tx, userId, sub.Id, common.GetTimestamp())
+		if err != nil {
+			return err
+		}
+		if err := invalidateTokenCacheForMutation(token.Key); err != nil {
+			return err
+		}
+		if err := tx.Model(token).Updates(map[string]any{"key": newKey, "accessed_time": common.GetTimestamp()}).Error; err != nil {
+			return err
+		}
+		token.Key = newKey
+		return nil
+	})
+	return token, err
 }
 
 // ---- 种子数据 ----

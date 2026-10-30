@@ -123,6 +123,19 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"DELETE /api/user/:id/2fa":                         accessTokenScopeRule("user:write"),
 
 	// router/api-router.go: /api/subscription
+	"GET /api/token-plan/plans":                          accessTokenScopeRule("wallet:read"),
+	"GET /api/token-plan/self":                           accessTokenScopeRule("api_key:reveal"),
+	"POST /api/token-plan/purchase":                      accessTokenScopeRule("wallet:write"),
+	"POST /api/token-plan/key/reset":                     accessTokenScopeRule("api_key:write"),
+	"GET /api/token-plan/admin/plans":                    accessTokenScopeRule("billing:read"),
+	"POST /api/token-plan/admin/plans":                   accessTokenScopeRule("billing:write"),
+	"PUT /api/token-plan/admin/plans/:id":                accessTokenScopeRule("billing:write"),
+	"DELETE /api/token-plan/admin/plans/:id":             accessTokenScopeRule("billing:write"),
+	"POST /api/token-plan/admin/plans/:id/sync-throttle": accessTokenScopeRule("billing:write"),
+	"GET /api/token-plan/admin/group-models":             accessTokenScopeRule("billing:read"),
+	"GET /api/token-plan/admin/subscribers":              accessTokenScopeRule("billing:read"),
+	"POST /api/token-plan/admin/reset-usage":             accessTokenScopeRule("billing:write"),
+
 	"GET /api/subscription/plans":                                    accessTokenScopeRule("wallet:read"),
 	"GET /api/subscription/self":                                     accessTokenScopeRule("wallet:read"),
 	"PUT /api/subscription/self/preference":                          accessTokenScopeRule("wallet:write"),

@@ -7464,6 +7464,7 @@
     "= {{count}} tokens": "= {{count}} tokens",
     "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).",
     "Throttling not synced to {{count}} subscriber(s)": "Throttling not synced to {{count}} subscriber(s)",
-    "Disabled plans stay visible to existing subscribers but cannot be purchased.": "Disabled plans stay visible to existing subscribers but cannot be purchased."
+    "Disabled plans stay visible to existing subscribers but cannot be purchased.": "Disabled plans stay visible to existing subscribers but cannot be purchased.",
+    "This plan has no available group for your account": "This plan has no available group for your account"
   }
 }

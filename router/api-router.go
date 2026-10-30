@@ -209,9 +209,9 @@ func SetApiRouter(router *gin.Engine) {
 		tokenPlanRoute.Use(middleware.UserAuth())
 		{
 			tokenPlanRoute.GET("/plans", controller.GetTokenPlanPlans)
-			tokenPlanRoute.GET("/self", controller.GetTokenPlanSelf)
-			tokenPlanRoute.POST("/purchase", middleware.CriticalRateLimit(), controller.PurchaseTokenPlan)
-			tokenPlanRoute.POST("/key/reset", middleware.CriticalRateLimit(), controller.ResetTokenPlanKey)
+			tokenPlanRoute.GET("/self", middleware.DisableCache(), controller.GetTokenPlanSelf)
+			tokenPlanRoute.POST("/purchase", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.PurchaseTokenPlan)
+			tokenPlanRoute.POST("/key/reset", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ResetTokenPlanKey)
 		}
 		tokenPlanAdminRoute := apiRouter.Group("/token-plan/admin")
 		tokenPlanAdminRoute.Use(middleware.AdminAuth())

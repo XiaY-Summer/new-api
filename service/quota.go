@@ -293,6 +293,11 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	if usage == nil {
 		usage = &dto.Usage{PromptTokens: relayInfo.GetEstimatePromptTokens(), TotalTokens: relayInfo.GetEstimatePromptTokens()}
 	}
+	if relayInfo.TokenPlanId > 0 {
+		if err := SettleTokenPlanUsage(relayInfo, model.TokenPlanUsageDetail{PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens}); err != nil {
+			logger.LogError(ctx, common.LogText("failed to record token plan usage: %s", err.Error()))
+		}
+	}
 
 	var tieredUsedVars map[string]bool
 	if snap := relayInfo.TieredBillingSnapshot; snap != nil {

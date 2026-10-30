@@ -431,6 +431,10 @@ func RelayTaskPluginEndpoint(c *gin.Context, fallback gin.HandlerFunc) {
 		fallback(c)
 		return
 	}
+	if common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId) > 0 {
+		middleware.TokenPlanReject()(c)
+		return
+	}
 	pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint)
 	if !ok || pinned.Plugin == nil || pinned.Generation == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -474,6 +478,10 @@ type taskSubmissionOutcome struct {
 }
 
 func RelayTask(c *gin.Context) {
+	if common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId) > 0 {
+		middleware.TokenPlanReject()(c)
+		return
+	}
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
 		respondTaskSubmissionError(c, &taskdto.TaskError{

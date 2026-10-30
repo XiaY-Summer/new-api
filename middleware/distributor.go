@@ -50,6 +50,10 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, invalidRequestStatus(err), i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		if !TokenPlanModelAllows(c, modelRequest.Model) {
+			abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
+			return
+		}
 		_, pinned, _ := constraints.ResolvedPin()
 		if !pinned {
 			// Select a channel for the user
@@ -534,6 +538,20 @@ func TokenModelLimitAllows(limit map[string]bool, model string) bool {
 		return true
 	}
 	return limit[ratio_setting.RoutingMatchModelName(model)]
+}
+
+// TokenPlanModelAllows applies the subscription snapshot independently of any
+// additional restrictions the owner placed on the dedicated key.
+func TokenPlanModelAllows(c *gin.Context, modelName string) bool {
+	limits := model.SplitModelLimits(common.GetContextKeyString(c, constant.ContextKeyTokenPlanModelLimits))
+	if len(limits) == 0 {
+		return true
+	}
+	allowed := make(map[string]bool, len(limits))
+	for _, name := range limits {
+		allowed[name] = true
+	}
+	return TokenModelLimitAllows(allowed, modelName)
 }
 
 // 修复 #4834: GET /v1/video/generations/:task_id && /v1/video/:task_id 此前不解析 model，

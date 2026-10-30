@@ -23,8 +23,9 @@ const (
 	ContextKeyTokenAutoGroups        ContextKey = "token_auto_groups"
 
 	/* token plan related keys */
-	ContextKeyTokenPlanId       ContextKey = "token_plan_id"
-	ContextKeyTokenPlanMetering ContextKey = "token_plan_metering"
+	ContextKeyTokenPlanId          ContextKey = "token_plan_id"
+	ContextKeyTokenPlanMetering    ContextKey = "token_plan_metering"
+	ContextKeyTokenPlanModelLimits ContextKey = "token_plan_model_limits"
 	// ContextKeyTokenPlanThrottle 承载 *model.TokenPlanThrottle，由 TokenPlanGuard 写入，
 	// relay.PrepareRequestBilling 读出后决定本次请求的首字延迟。
 	ContextKeyTokenPlanThrottle ContextKey = "token_plan_throttle"

@@ -11,6 +11,8 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -32,7 +34,7 @@ func TokenPlanGuard() gin.HandlerFunc {
 			abortWithOpenAiMessage(c, http.StatusInternalServerError, common.TranslateMessage(c, i18n.MsgDatabaseError))
 			return
 		}
-		if sub == nil {
+		if sub == nil || sub.UserId != c.GetInt("id") {
 			abortWithOpenAiMessage(c, http.StatusForbidden,
 				i18n.T(c, i18n.MsgTokenPlanNotFound), types.ErrorCodeInsufficientUserQuota)
 			return
@@ -78,6 +80,21 @@ func TokenPlanGuard() gin.HandlerFunc {
 				}
 			}
 			if !matched {
+				// A dedicated key inherits the user's group by default. Select
+				// an allowed plan group only from groups the user already owns.
+				if common.GetContextKeyString(c, constant.ContextKeyTokenGroup) == "" {
+					usable := service.GetUserUsableGroups(common.GetContextKeyString(c, constant.ContextKeyUserGroup))
+					for _, group := range allowed {
+						if _, ok := usable[group]; ok && ratio_setting.ContainsGroupRatio(group) {
+							common.SetContextKey(c, constant.ContextKeyUsingGroup, group)
+							common.SetContextKey(c, constant.ContextKeyTokenGroup, group)
+							matched = true
+							break
+						}
+					}
+				}
+			}
+			if !matched {
 				abortWithOpenAiMessage(c, http.StatusForbidden,
 					i18n.T(c, i18n.MsgTokenPlanGroupForbidden, map[string]any{"Group": usingGroup}),
 					types.ErrorCodeInsufficientUserQuota)
@@ -102,7 +119,7 @@ func TokenPlanGuard() gin.HandlerFunc {
 		}
 
 		// 并发槽位必须在所有拒绝分支之后申请，否则一个注定被 403 的请求会白占槽位。
-		release := tokenPlanConcurrencyAcquire(sub, throttle.ConcurrencyLimit)
+		release := tokenPlanConcurrencyAcquire(sub, throttle.ConcurrencyLimit, c)
 		if release == nil {
 			abortWithOpenAiMessage(c, http.StatusTooManyRequests,
 				i18n.T(c, i18n.MsgTokenPlanConcurrencyLimited, map[string]any{
@@ -116,6 +133,7 @@ func TokenPlanGuard() gin.HandlerFunc {
 		defer release()
 
 		common.SetContextKey(c, constant.ContextKeyTokenPlanMetering, sub.MeteringMode)
+		common.SetContextKey(c, constant.ContextKeyTokenPlanModelLimits, sub.ModelLimits)
 		common.SetContextKey(c, constant.ContextKeyTokenPlanThrottle, &throttle)
 		c.Next()
 	}

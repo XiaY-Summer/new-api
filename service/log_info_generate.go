@@ -72,6 +72,14 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 	other.SetAdmin("use_channel", ctx.GetStringSlice("use_channel"))
 	if relayInfo != nil {
+		if relayInfo.TokenPlanId > 0 {
+			other.SetPublic("billing_source", "token_plan")
+			other.SetPublic("token_plan_id", relayInfo.TokenPlanId)
+			other.SetPublic("token_plan_tokens", relayInfo.TokenPlanConsumed)
+			other.SetPublic("token_plan_metering", relayInfo.TokenPlanMetering)
+			other.SetAdmin("token_plan_pre_consumed", relayInfo.TokenPlanPreConsumed)
+			other.SetAdmin("token_plan_request_id", relayInfo.TokenPlanRequestId)
+		}
 		if billingModel := relayInfo.GetBillingModelName(); billingModel != "" && billingModel != relayInfo.OriginModelName {
 			other.SetAdmin("billing_model", billingModel)
 		}

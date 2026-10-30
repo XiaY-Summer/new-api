@@ -16,7 +16,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -504,22 +503,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	// 缓存命中与缓存写入走各自的倍率——两者上游单价与普通输入不同，按原价计会失真。
 	// 计量失败只记日志，不影响已经返回给用户的结果。
 	if relayInfo.TokenPlanId > 0 {
-		billingModel := relayInfo.GetBillingModelName()
-		// 套餐请求在预扣阶段跳过了定价计算，PriceData 未填充，倍率需要回查模型配置。
-		// 回填到 summary 上，消费日志里的 model_ratio / cache_ratio 才不会显示为 0。
-		if summary.ModelRatio <= 0 {
-			summary.ModelRatio, _, _ = ratio_setting.GetModelRatio(billingModel)
-		}
-		if summary.CacheRatio <= 0 {
-			summary.CacheRatio, _ = ratio_setting.GetCacheRatio(billingModel)
-		}
-		if summary.CacheCreationRatio <= 0 {
-			summary.CacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(billingModel)
-		}
-		detail := summary.tokenPlanUsageDetail(summary.ModelRatio, summary.CacheRatio, summary.CacheCreationRatio)
-		if err := model.RecordUsage(relayInfo.UserId, relayInfo.TokenPlanId, detail, relayInfo.TokenPlanMetering); err != nil {
+		detail := summary.tokenPlanUsageDetail(0, 0, 0)
+		if err := SettleTokenPlanUsage(relayInfo, detail); err != nil {
 			logger.LogError(ctx, common.LogText("failed to record token plan usage: %s", err.Error()))
 		}
+		summary.ModelRatio, summary.CacheRatio, summary.CacheCreationRatio = relayInfo.TokenPlanRates.ModelRatio, relayInfo.TokenPlanRates.CacheRatio, relayInfo.TokenPlanRates.CacheCreationRatio
+		summary.CompletionRatio = 1
 	}
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {

@@ -7464,6 +7464,7 @@
     "= {{count}} tokens": "= {{count}} tokens",
     "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 表示所有请求都参与判定。请填纯数字，例如 500000，不支持 500K 这种写法。",
     "Throttling not synced to {{count}} subscriber(s)": "节流未同步到 {{count}} 个订阅",
-    "Disabled plans stay visible to existing subscribers but cannot be purchased.": "下架后已订阅的用户仍可继续使用，但新用户无法购买。"
+    "Disabled plans stay visible to existing subscribers but cannot be purchased.": "下架后已订阅的用户仍可继续使用，但新用户无法购买。",
+    "This plan has no available group for your account": "此套餐没有您的账号可用的分组"
   }
 }

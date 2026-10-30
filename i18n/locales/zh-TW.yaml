@@ -38,6 +38,7 @@ token_plan.group_forbidden: "目前 TOKEN PLAN 不包含 {{.Group}} 分組，請
 token_plan.rate_limited: "TOKEN PLAN 每 {{.Window}} 最多 {{.Max}} 次請求，請稍後重試"
 token_plan.concurrency_limited: "TOKEN PLAN 最多同時 {{.Max}} 個請求，請等待目前請求結束後重試"
 token_plan.endpoint_unsupported: "TOKEN PLAN 專用密鑰暫不支援該介面"
+token_plan.output_limit_required: "TOKEN PLAN 文字生成請求必須明確設定大於 0 的 max_tokens、max_completion_tokens、max_output_tokens 或 maxOutputTokens 輸出上限。"
 relay.model_price_not_configured: "模型 {{.Model}} 的價格尚未由管理員設定，暫時無法使用，請聯絡站點管理員開啟該模型"
 relay.model_price_not_configured_admin: "模型 {{.Model}} 的價格未設定。請前往「系統設定 → 營運設定」開啟自用模式，或在「系統設定 → 分組與模型定價設定」中為該模型設定價格"
 relay.task_usage_price_unsupported: "模型 {{.Model}} 使用了任務用量表達式；請為一般轉發設定常規定價，並為插件單獨設定計費表達式"

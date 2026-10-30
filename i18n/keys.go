@@ -46,6 +46,7 @@ const (
 	MsgTokenPlanRateLimited              = "token_plan.rate_limited"
 	MsgTokenPlanConcurrencyLimited       = "token_plan.concurrency_limited"
 	MsgTokenPlanEndpointUnsupported      = "token_plan.endpoint_unsupported"
+	MsgTokenPlanOutputLimitRequired      = "token_plan.output_limit_required"
 	MsgRelayModelPriceNotConfigured      = "relay.model_price_not_configured"
 	MsgRelayModelPriceNotConfiguredAdmin = "relay.model_price_not_configured_admin"
 	MsgRelayTaskUsagePriceUnsupported    = "relay.task_usage_price_unsupported"

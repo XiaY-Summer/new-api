@@ -283,6 +283,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			return apiErr
 		}
 		billingPrepared = true
+		if !relaycommon.WaitFirstByteDelay(c.Request.Context(), info.TakeFirstByteDelay()) {
+			return types.NewError(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+		}
 		var payload []byte
 		payload, apiErr = buildResponsesWSCreatePayload(c, info, create.Request, create.Generate, create.StreamID)
 		if apiErr != nil {
@@ -309,6 +312,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 					return apiErr
 				}
 				billingPrepared = true
+				if !relaycommon.WaitFirstByteDelay(c.Request.Context(), info.TakeFirstByteDelay()) {
+					return types.NewError(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+				}
 			} else {
 				info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 				if apiErr = service.PrepareTieredBillingForSelectedGroup(c, info); apiErr != nil {
@@ -910,6 +916,9 @@ func buildResponsesWSErrorPayload(eventID, streamID string, apiErr *types.NewAPI
 // pinned to a channel: the check is stricter there on purpose, because a
 // persistent connection keeps serving the model after the pin was resolved.
 func checkResponsesWSModelAccess(c *gin.Context, modelName string) *types.NewAPIError {
+	if !middleware.TokenPlanModelAllows(c, modelName) {
+		return types.NewErrorWithStatusCode(fmt.Errorf("token is not allowed to use model %s", modelName), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+	}
 	if !common.GetContextKeyBool(c, appconstant.ContextKeyTokenModelLimitEnabled) {
 		return nil
 	}

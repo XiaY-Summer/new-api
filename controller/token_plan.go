@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
@@ -228,14 +229,42 @@ func PurchaseTokenPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	plan, err := model.GetTokenPlanById(req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if groups := plan.GroupLimitList(); len(groups) > 0 {
+		userGroup, err := model.GetUserGroup(userId, false)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		usable := service.GetUserUsableGroups(userGroup)
+		available := false
+		for _, group := range groups {
+			if _, ok := usable[group]; ok && ratio_setting.ContainsGroupRatio(group) {
+				available = true
+				break
+			}
+		}
+		if !available {
+			common.ApiErrorT(c, "This plan has no available group for your account")
+			return
+		}
+	}
 	sub, token, err := model.PurchaseTokenPlan(userId, req.PlanId)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	key := token.Key
+	if c.GetBool("use_access_token") && !c.GetBool("access_token_legacy") && !service.AccessTokenScopeGranted(c.GetStringSlice("access_token_scopes"), "api_key:reveal") {
+		key = ""
+	}
 	common.ApiSuccess(c, gin.H{
 		"subscription": sub,
-		"key":          token.Key,
+		"key":          key,
 	})
 }
 
@@ -290,6 +319,9 @@ func validateTokenPlan(plan *model.TokenPlan) string {
 	if plan.TotalTokens < 0 {
 		return "Total tokens cannot be negative"
 	}
+	if plan.TotalTokens > common.MaxWalletQuota || plan.Window1Tokens > common.MaxWalletQuota || plan.Window2Tokens > common.MaxWalletQuota || plan.DurationDays > 36500 {
+		return "Invalid parameters"
+	}
 	if plan.Window1Seconds <= 0 || plan.Window2Seconds <= 0 {
 		return "Window duration must be greater than 0"
 	}
@@ -305,6 +337,11 @@ func validateTokenPlan(plan *model.TokenPlan) string {
 // validateTokenPlanThrottle 在归一化之前校验节流参数，把明显填错的值挡下来，
 // 而不是悄悄夹到合法范围——管理员以为改成了 150%，实际存成 100% 更难排查。
 func validateTokenPlanThrottle(v TokenPlanView) string {
+	if v.Window1Minutes > 52560000 || v.Window2Minutes > 52560000 ||
+		v.FirstByteDelayPromptThreshold > common.MaxQuota || v.FirstByteDelayMaxMs > common.MaxQuota ||
+		v.ConcurrencyLimit > common.MaxQuota || v.RateLimitCount > common.MaxQuota || v.RateLimitWindowSeconds > common.MaxQuota {
+		return "Invalid parameters"
+	}
 	if v.FirstByteDelayProbability < 0 || v.FirstByteDelayProbability > 100 {
 		return "Trigger probability must be between 0 and 100"
 	}
@@ -491,8 +528,7 @@ type AdminResetTokenPlanUsageRequest struct {
 // AdminResetTokenPlanUsage 清零套餐用量并重置窗口锚点。
 func AdminResetTokenPlanUsage(c *gin.Context) {
 	var req AdminResetTokenPlanUsageRequest
-	_ = c.ShouldBindJSON(&req)
-	if req.UserId < 0 {
+	if err := c.ShouldBindJSON(&req); err != nil || req.UserId < 0 {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
