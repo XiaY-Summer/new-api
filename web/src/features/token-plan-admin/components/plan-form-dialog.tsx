@@ -29,7 +29,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
-import { formatWindowDuration } from '@/features/token-plan/lib/format'
+import {
+  formatTokens,
+  formatWindowDuration,
+} from '@/features/token-plan/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
@@ -399,12 +402,22 @@ export function PlanFormDialog({
               <Input
                 id='tp-fbd-threshold'
                 type='number'
+                min={0}
                 disabled={!form.first_byte_delay_enabled}
                 value={form.first_byte_delay_prompt_threshold}
                 onChange={(e) =>
                   set('first_byte_delay_prompt_threshold', Number(e.target.value))
                 }
               />
+              <p className='text-muted-foreground text-[11px]'>
+                {form.first_byte_delay_prompt_threshold > 0
+                  ? t('= {{count}} tokens', {
+                      count: formatTokens(form.first_byte_delay_prompt_threshold),
+                    })
+                  : t(
+                      '0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).'
+                    )}
+              </p>
             </div>
             <div className='flex flex-col gap-1.5'>
               <Label htmlFor='tp-fbd-probability'>

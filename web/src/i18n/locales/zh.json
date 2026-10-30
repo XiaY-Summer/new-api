@@ -7459,6 +7459,8 @@
     "Sync throttling to subscribers": "同步节流配置到订阅用户",
     "Synced throttling to {{count}} subscription(s)": "已同步到 {{count}} 个订阅",
     "Failed to sync throttling": "同步节流配置失败",
-    "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.": "这会把当前节流配置推送到该套餐所有生效中的订阅，额度、窗口与到期时间不受影响。"
+    "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.": "这会把当前节流配置推送到该套餐所有生效中的订阅，额度、窗口与到期时间不受影响。",
+    "= {{count}} tokens": "= {{count}} tokens",
+    "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 表示所有请求都参与判定。请填纯数字，例如 500000，不支持 500K 这种写法。"
   }
 }
