@@ -369,6 +369,129 @@ export function PlanFormDialog({
             {t('Comma separated. Leave empty to allow every enabled model.')}
           </p>
         </div>
+
+        <div className='mt-1 flex flex-col gap-1 border-t pt-3 sm:col-span-2'>
+          <p className='text-sm font-medium'>{t('Throttling')}</p>
+          <p className='text-muted-foreground text-[11px]'>
+            {t(
+              'Applied per subscription. 0 means unlimited. The delay only slows the first byte, not the total throughput.'
+            )}
+          </p>
+        </div>
+
+        <div className='flex flex-col gap-3 rounded-md border p-3 sm:col-span-2'>
+          <div className='flex items-center gap-2'>
+            <Switch
+              id='tp-fbd-enabled'
+              checked={form.first_byte_delay_enabled}
+              onCheckedChange={(checked) =>
+                set('first_byte_delay_enabled', checked)
+              }
+            />
+            <Label htmlFor='tp-fbd-enabled'>{t('First-byte delay')}</Label>
+          </div>
+
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+            <div className='flex flex-col gap-1.5'>
+              <Label htmlFor='tp-fbd-threshold'>
+                {t('Prompt token threshold (0 = always)')}
+              </Label>
+              <Input
+                id='tp-fbd-threshold'
+                type='number'
+                disabled={!form.first_byte_delay_enabled}
+                value={form.first_byte_delay_prompt_threshold}
+                onChange={(e) =>
+                  set('first_byte_delay_prompt_threshold', Number(e.target.value))
+                }
+              />
+            </div>
+            <div className='flex flex-col gap-1.5'>
+              <Label htmlFor='tp-fbd-probability'>
+                {t('Trigger probability (%)')}
+              </Label>
+              <Input
+                id='tp-fbd-probability'
+                type='number'
+                min={0}
+                max={100}
+                disabled={!form.first_byte_delay_enabled}
+                value={form.first_byte_delay_probability}
+                onChange={(e) =>
+                  set('first_byte_delay_probability', Number(e.target.value))
+                }
+              />
+            </div>
+          </div>
+
+          <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+            <div className='flex flex-col gap-1.5'>
+              <Label htmlFor='tp-fbd-min'>{t('Delay min (ms)')}</Label>
+              <Input
+                id='tp-fbd-min'
+                type='number'
+                disabled={!form.first_byte_delay_enabled}
+                value={form.first_byte_delay_min_ms}
+                onChange={(e) =>
+                  set('first_byte_delay_min_ms', Number(e.target.value))
+                }
+              />
+            </div>
+            <div className='flex flex-col gap-1.5'>
+              <Label htmlFor='tp-fbd-max'>{t('Delay max (ms)')}</Label>
+              <Input
+                id='tp-fbd-max'
+                type='number'
+                disabled={!form.first_byte_delay_enabled}
+                value={form.first_byte_delay_max_ms}
+                onChange={(e) =>
+                  set('first_byte_delay_max_ms', Number(e.target.value))
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className='grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3'>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='tp-concurrency'>
+              {t('Concurrency limit (0 = unlimited)')}
+            </Label>
+            <Input
+              id='tp-concurrency'
+              type='number'
+              value={form.concurrency_limit}
+              onChange={(e) =>
+                set('concurrency_limit', Number(e.target.value))
+              }
+            />
+          </div>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='tp-rate-count'>
+              {t('Rate limit requests (0 = unlimited)')}
+            </Label>
+            <Input
+              id='tp-rate-count'
+              type='number'
+              value={form.rate_limit_count}
+              onChange={(e) => set('rate_limit_count', Number(e.target.value))}
+            />
+          </div>
+          <div className='flex flex-col gap-1.5'>
+            <Label htmlFor='tp-rate-window'>
+              {t('Rate limit window (seconds)')}
+            </Label>
+            <Input
+              id='tp-rate-window'
+              type='number'
+              disabled={form.rate_limit_count <= 0}
+              value={form.rate_limit_window_seconds}
+              onChange={(e) =>
+                set('rate_limit_window_seconds', Number(e.target.value))
+              }
+            />
+          </div>
+        </div>
       </div>
     </Dialog>
   )

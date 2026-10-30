@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -48,6 +48,7 @@ import {
   getAdminTokenPlans,
   getTokenPlanSubscribers,
   resetTokenPlanUsage,
+  syncTokenPlanThrottle,
 } from './api'
 import { PlanFormDialog } from './components/plan-form-dialog'
 import type { TokenPlanAdminRecord, TokenPlanSubscriber } from './types'
@@ -68,6 +69,8 @@ export function TokenPlans() {
   const [removing, setRemoving] = useState(false)
   const [resetTarget, setResetTarget] = useState<ResetTarget>(null)
   const [resetting, setResetting] = useState(false)
+  const [syncing, setSyncing] = useState<TokenPlanAdminRecord | null>(null)
+  const [syncPending, setSyncPending] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: QUERY_KEY,
@@ -136,6 +139,28 @@ export function TokenPlans() {
 
   const plans = data ?? []
   const subscribers = subscribersQuery.data ?? []
+
+  const handleSyncThrottle = async () => {
+    if (!syncing) return
+    setSyncPending(true)
+    try {
+      const result = await syncTokenPlanThrottle(syncing.id)
+      if (!result.success) {
+        throw createServerError(result, t('Failed to sync throttling'))
+      }
+      toast.success(
+        t('Synced throttling to {{count}} subscription(s)', {
+          count: result.data?.affected ?? 0,
+        })
+      )
+      setSyncing(null)
+      queryClient.invalidateQueries({ queryKey: SUBSCRIBERS_QUERY_KEY })
+    } catch (error) {
+      handleServerError(error, t('Failed to sync throttling'))
+    } finally {
+      setSyncPending(false)
+    }
+  }
 
   return (
     <>
@@ -207,6 +232,36 @@ export function TokenPlans() {
                             <div className='text-muted-foreground max-w-64 truncate text-xs'>
                               {plan.subtitle}
                             </div>
+                            <div className='text-muted-foreground max-w-64 truncate text-[11px]'>
+                              {[
+                                plan.first_byte_delay_enabled
+                                  ? t(
+                                      'Delay {{min}}-{{max}}ms · {{percent}}%',
+                                      {
+                                        min: plan.first_byte_delay_min_ms,
+                                        max: plan.first_byte_delay_max_ms,
+                                        percent:
+                                          plan.first_byte_delay_probability,
+                                      }
+                                    )
+                                  : null,
+                                plan.concurrency_limit > 0
+                                  ? t('Concurrency {{count}}', {
+                                      count: plan.concurrency_limit,
+                                    })
+                                  : null,
+                                plan.rate_limit_count > 0
+                                  ? t('{{count}} requests / {{window}}', {
+                                      count: plan.rate_limit_count,
+                                      window: formatWindowDuration(
+                                        plan.rate_limit_window_seconds
+                                      ),
+                                    })
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ') || t('No throttling')}
+                            </div>
                           </TableCell>
                           <TableCell className='text-right tabular-nums'>
                             ¥{plan.price_amount}
@@ -247,6 +302,14 @@ export function TokenPlans() {
                                 }}
                               >
                                 <Pencil className='h-4 w-4' />
+                              </Button>
+                              <Button
+                                variant='ghost'
+                                size='icon'
+                                aria-label={t('Sync throttling to subscribers')}
+                                onClick={() => setSyncing(plan)}
+                              >
+                                <RefreshCw className='h-4 w-4' />
                               </Button>
                               <Button
                                 variant='ghost'
@@ -390,6 +453,18 @@ export function TokenPlans() {
         destructive
         isLoading={removing}
         handleConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={!!syncing}
+        onOpenChange={(open) => !open && setSyncing(null)}
+        title={t('Sync throttling')}
+        desc={t(
+          'This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.'
+        )}
+        confirmText={t('Sync throttling')}
+        isLoading={syncPending}
+        handleConfirm={handleSyncThrottle}
       />
 
       <ConfirmDialog

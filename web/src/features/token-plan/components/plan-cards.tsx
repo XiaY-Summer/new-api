@@ -160,6 +160,30 @@ export function PlanCards({
                       : t('Metered by raw tokens')}
                   </span>
                 </li>
+                {/* 只展示并发与频率：首字延迟属于限速手段，不在售卖页披露。 */}
+                {plan.concurrency_limit > 0 ? (
+                  <li className='flex items-start gap-2'>
+                    <Check className='text-success mt-0.5 h-3.5 w-3.5 shrink-0' />
+                    <span>
+                      {t('Concurrency limit')}:{' '}
+                      <span className='font-medium tabular-nums'>
+                        {plan.concurrency_limit}
+                      </span>
+                    </span>
+                  </li>
+                ) : null}
+                {plan.rate_limit_count > 0 ? (
+                  <li className='flex items-start gap-2'>
+                    <Check className='text-success mt-0.5 h-3.5 w-3.5 shrink-0' />
+                    <span>
+                      {t('Rate limit')}:{' '}
+                      <span className='font-medium tabular-nums'>
+                        {plan.rate_limit_count}
+                      </span>{' '}
+                      / {formatWindowDuration(plan.rate_limit_window_seconds)}
+                    </span>
+                  </li>
+                ) : null}
               </ul>
             </CardContent>
             <CardFooter>

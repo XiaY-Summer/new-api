@@ -74,3 +74,11 @@ export async function resetTokenPlanUsage(
   })
   return res.data
 }
+
+/** 把套餐当前的节流参数推送到该套餐所有生效中的订阅。 */
+export async function syncTokenPlanThrottle(
+  id: number
+): Promise<ApiResponse<{ affected: number }>> {
+  const res = await api.post(`/api/token-plan/admin/plans/${id}/sync-throttle`)
+  return res.data
+}

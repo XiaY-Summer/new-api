@@ -7438,6 +7438,27 @@
     "This clears consumed tokens for every active subscription and restarts their windows. It cannot be undone.": "这会清零所有生效中订阅的已消耗额度，并重启它们的窗口，且无法撤销。",
     "This clears the consumed tokens of this subscription and restarts its windows. It cannot be undone.": "这会清零该订阅的已消耗额度，并重启它的窗口，且无法撤销。",
     "No active subscriptions yet.": "暂无生效中的订阅。",
-    "All groups": "全部分组"
+    "All groups": "全部分组",
+    "Throttling": "节流",
+    "Applied per subscription. 0 means unlimited. The delay only slows the first byte, not the total throughput.": "按订阅生效，0 表示不限。延迟只影响首字，不影响整体吞吐。",
+    "First-byte delay": "首字延迟",
+    "Prompt token threshold (0 = always)": "上下文阈值（0 = 始终触发）",
+    "Trigger probability (%)": "触发概率（%）",
+    "Delay min (ms)": "延迟下限（毫秒）",
+    "Delay max (ms)": "延迟上限（毫秒）",
+    "Concurrency limit (0 = unlimited)": "并发上限（0 = 不限）",
+    "Rate limit requests (0 = unlimited)": "频率上限（0 = 不限）",
+    "Rate limit window (seconds)": "频率窗口（秒）",
+    "No throttling": "未配置节流",
+    "Delay {{min}}-{{max}}ms · {{percent}}%": "延迟 {{min}}-{{max}}ms · {{percent}}%",
+    "Concurrency {{count}}": "并发 {{count}}",
+    "{{count}} requests / {{window}}": "{{count}} 次 / {{window}}",
+    "Concurrency limit": "并发上限",
+    "Rate limit": "频率限制",
+    "Sync throttling": "同步节流配置",
+    "Sync throttling to subscribers": "同步节流配置到订阅用户",
+    "Synced throttling to {{count}} subscription(s)": "已同步到 {{count}} 个订阅",
+    "Failed to sync throttling": "同步节流配置失败",
+    "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.": "这会把当前节流配置推送到该套餐所有生效中的订阅，额度、窗口与到期时间不受影响。"
   }
 }

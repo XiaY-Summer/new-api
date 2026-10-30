@@ -40,6 +40,14 @@ export interface TokenPlan {
   metering_mode: TokenPlanMeteringMode
   model_limits: string
   group_limits: string
+  first_byte_delay_enabled: boolean
+  first_byte_delay_prompt_threshold: number
+  first_byte_delay_probability: number
+  first_byte_delay_min_ms: number
+  first_byte_delay_max_ms: number
+  concurrency_limit: number
+  rate_limit_count: number
+  rate_limit_window_seconds: number
   enabled: boolean
 }
 

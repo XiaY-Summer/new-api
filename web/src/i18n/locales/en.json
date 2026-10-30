@@ -7438,6 +7438,27 @@
     "This clears consumed tokens for every active subscription and restarts their windows. It cannot be undone.": "This clears consumed tokens for every active subscription and restarts their windows. It cannot be undone.",
     "This clears the consumed tokens of this subscription and restarts its windows. It cannot be undone.": "This clears the consumed tokens of this subscription and restarts its windows. It cannot be undone.",
     "No active subscriptions yet.": "No active subscriptions yet.",
-    "All groups": "All groups"
+    "All groups": "All groups",
+    "Throttling": "Throttling",
+    "Applied per subscription. 0 means unlimited. The delay only slows the first byte, not the total throughput.": "Applied per subscription. 0 means unlimited. The delay only slows the first byte, not the total throughput.",
+    "First-byte delay": "First-byte delay",
+    "Prompt token threshold (0 = always)": "Prompt token threshold (0 = always)",
+    "Trigger probability (%)": "Trigger probability (%)",
+    "Delay min (ms)": "Delay min (ms)",
+    "Delay max (ms)": "Delay max (ms)",
+    "Concurrency limit (0 = unlimited)": "Concurrency limit (0 = unlimited)",
+    "Rate limit requests (0 = unlimited)": "Rate limit requests (0 = unlimited)",
+    "Rate limit window (seconds)": "Rate limit window (seconds)",
+    "No throttling": "No throttling",
+    "Delay {{min}}-{{max}}ms · {{percent}}%": "Delay {{min}}-{{max}}ms · {{percent}}%",
+    "Concurrency {{count}}": "Concurrency {{count}}",
+    "{{count}} requests / {{window}}": "{{count}} requests / {{window}}",
+    "Concurrency limit": "Concurrency limit",
+    "Rate limit": "Rate limit",
+    "Sync throttling": "Sync throttling",
+    "Sync throttling to subscribers": "Sync throttling to subscribers",
+    "Synced throttling to {{count}} subscription(s)": "Synced throttling to {{count}} subscription(s)",
+    "Failed to sync throttling": "Failed to sync throttling",
+    "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.": "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched."
   }
 }

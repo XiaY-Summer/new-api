@@ -40,6 +40,15 @@ export interface TokenPlanAdminRecord {
   metering_mode: TokenPlanMeteringMode
   model_limits: string
   group_limits: string
+  // 节流：延迟用毫秒、概率用 0-100、频率窗口用秒。
+  first_byte_delay_enabled: boolean
+  first_byte_delay_prompt_threshold: number
+  first_byte_delay_probability: number
+  first_byte_delay_min_ms: number
+  first_byte_delay_max_ms: number
+  concurrency_limit: number
+  rate_limit_count: number
+  rate_limit_window_seconds: number
   enabled: boolean
 }
 
@@ -78,6 +87,14 @@ export function emptyTokenPlan(): TokenPlanAdminRecord {
     metering_mode: 'weighted',
     model_limits: '',
     group_limits: '',
+    first_byte_delay_enabled: false,
+    first_byte_delay_prompt_threshold: 0,
+    first_byte_delay_probability: 100,
+    first_byte_delay_min_ms: 300,
+    first_byte_delay_max_ms: 800,
+    concurrency_limit: 0,
+    rate_limit_count: 0,
+    rate_limit_window_seconds: 60,
     enabled: true,
   }
 }
