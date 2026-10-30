@@ -49,8 +49,12 @@ export function TokenPlan() {
   // 已订阅时套餐列表收进弹窗，避免把在售套餐和当前套餐混在一起。
   const [plansOpen, setPlansOpen] = useState(false)
 
+  // 套餐与订阅状态都可能被管理员在后台改动（删除套餐会直接取消订阅），
+  // 所以不吃全局的 staleTime 缓存：每次进入页面都重新拉，切回标签页也重新拉。
   const plansQuery = useQuery({
     queryKey: [...QUERY_KEY, 'plans'],
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const result = await getTokenPlanPlans()
       if (!result.success) {
@@ -62,6 +66,8 @@ export function TokenPlan() {
 
   const selfQuery = useQuery({
     queryKey: [...QUERY_KEY, 'self'],
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       const result = await getTokenPlanSelf()
       if (!result.success) {
@@ -152,6 +158,23 @@ export function TokenPlan() {
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>TOKEN PLAN</SectionPageLayout.Title>
+      <SectionPageLayout.Actions>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={plansQuery.isFetching || selfQuery.isFetching}
+          onClick={invalidate}
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${
+              plansQuery.isFetching || selfQuery.isFetching
+                ? 'animate-spin'
+                : ''
+            }`}
+          />
+          {t('Refresh')}
+        </Button>
+      </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-4 pb-6'>
           {hasPlan && self?.subscription ? (
