@@ -150,6 +150,11 @@ func GetTokenPlanSelf(c *gin.Context) {
 	if unrestricted {
 		models = model.GetEnabledModels()
 	}
+	// 空切片而非 nil，避免前端拿到 null 还要额外判空。
+	groups := model.SplitModelLimits(sub.GroupLimits)
+	if groups == nil {
+		groups = []string{}
+	}
 
 	common.ApiSuccess(c, gin.H{
 		"has_plan": true,
@@ -170,7 +175,7 @@ func GetTokenPlanSelf(c *gin.Context) {
 		"windows":      []model.TokenPlanWindowView{window1, window2},
 		"key":          keyInfo,
 		"models":       models,
-		"groups":       model.SplitModelLimits(sub.GroupLimits),
+		"groups":       groups,
 		"unrestricted": unrestricted,
 	})
 }
