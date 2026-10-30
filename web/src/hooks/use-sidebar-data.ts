@@ -21,6 +21,7 @@ import {
   Box,
   ClipboardList,
   CreditCard,
+  Crown,
   FileText,
   FlaskConical,
   Key,
@@ -89,6 +90,11 @@ export function useSidebarData(): SidebarData {
             icon: Key,
           },
           {
+            title: t('TOKEN PLAN'),
+            url: '/token-plan',
+            icon: Crown,
+          },
+          {
             title: t('Usage Logs'),
             url: '/usage-logs/common',
             icon: FileText,
@@ -141,6 +147,11 @@ export function useSidebarData(): SidebarData {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,
+          },
+          {
+            title: t('Subscription Plan Management'),
+            url: '/token-plans',
+            icon: CreditCard,
           },
           {
             title: t('Users'),

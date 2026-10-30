@@ -367,6 +367,8 @@ func migrateDB() error {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
+		&TokenPlan{},
+		&UserTokenPlan{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
@@ -397,6 +399,10 @@ func migrateDB() error {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
 		}
+	}
+	// TOKEN PLAN 占位套餐：仅在表为空时写入，避免覆盖管理员配置
+	if err := EnsureTokenPlanSeed(); err != nil {
+		common.SysError(common.LogText("failed to seed token plans: %s", err.Error()))
 	}
 	return nil
 }

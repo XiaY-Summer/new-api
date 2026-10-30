@@ -151,6 +151,10 @@ type RelayInfo struct {
 	// SubscriptionPlanId / SubscriptionPlanTitle are used for logging/UI display.
 	SubscriptionPlanId    int
 	SubscriptionPlanTitle string
+	// TokenPlanId 非零表示本次请求由 TOKEN PLAN 专用密钥发起：跳过钱包/订阅计费，
+	// 改由 PostTextConsumeQuota 按 token 计量（TokenPlanMetering 决定是否按模型倍率加权）。
+	TokenPlanId       int
+	TokenPlanMetering string
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.

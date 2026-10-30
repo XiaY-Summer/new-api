@@ -66,7 +66,7 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
 end
 if redis.call('EXISTS', KEYS[1]) == 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[18])
+  redis.call('EXPIRE', KEYS[1], ARGV[19])
   return 2
 end
 redis.call('HSET', KEYS[1],
@@ -75,9 +75,16 @@ redis.call('HSET', KEYS[1],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
   'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16],
-  'AllowUserQuotaQuery', ARGV[17])
-redis.call('EXPIRE', KEYS[1], ARGV[18])
+  'AllowUserQuotaQuery', ARGV[17], 'TokenPlanId', ARGV[18])
+redis.call('EXPIRE', KEYS[1], ARGV[19])
 return 1`
+
+	// TokenPlanId 必须进缓存，否则从缓存读回的专用密钥会丢失 TOKEN PLAN 绑定，
+	// 被当成普通密钥放行。nil 用 0 表示，读取端按 >0 判断。
+	tokenPlanId := 0
+	if token.TokenPlanId != nil {
+		tokenPlanId = *token.TokenPlanId
+	}
 
 	return common.RDB.Eval(context.Background(), script, []string{
 		getTokenCacheKey(token.Key), getTokenCacheFenceKey(token.Key),
@@ -87,7 +94,7 @@ return 1`
 		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.AutoGroups, token.RemainQuota, token.UsedQuota,
-		strconv.FormatBool(token.AllowUserQuotaQuery),
+		strconv.FormatBool(token.AllowUserQuotaQuery), tokenPlanId,
 		tokenCacheTTLSeconds(),
 	).Int()
 }

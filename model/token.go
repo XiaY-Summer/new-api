@@ -32,6 +32,9 @@ type Token struct {
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 	// 允许用此令牌查询所属用户的额度；新建令牌默认开启，已有令牌升级后保持关闭
 	AllowUserQuotaQuery bool `json:"allow_user_quota_query"`
+	// TokenPlanId 非空表示这是 TOKEN PLAN 专用密钥，指向 user_token_plans.id。
+	// 用指针 + 唯一索引：MySQL/SQLite 允许多个 NULL，天然保证一个套餐只挂一个 key。
+	TokenPlanId *int `json:"token_plan_id" gorm:"uniqueIndex"`
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -108,7 +111,8 @@ func (token *Token) GetIpLimits() []string {
 func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	var tokens []*Token
 	var err error
-	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
+	// TOKEN PLAN 专用密钥由套餐页面单独管理，不出现在「API 密钥」列表里。
+	err = DB.Where("user_id = ? AND token_plan_id IS NULL", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
 	return tokens, err
 }
 
@@ -185,7 +189,7 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		}
 	}
 
-	baseQuery := DB.Model(&Token{}).Where("user_id = ?", userId)
+	baseQuery := DB.Model(&Token{}).Where("user_id = ? AND token_plan_id IS NULL", userId)
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
 	if keyword != "" {
@@ -440,7 +444,7 @@ func decreaseTokenQuota(id int, quota int) (err error) {
 // CountUserTokens returns total number of tokens for the given user, used for pagination
 func CountUserTokens(userId int) (int64, error) {
 	var total int64
-	err := DB.Model(&Token{}).Where("user_id = ?", userId).Count(&total).Error
+	err := DB.Model(&Token{}).Where("user_id = ? AND token_plan_id IS NULL", userId).Count(&total).Error
 	return total, err
 }
 

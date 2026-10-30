@@ -452,6 +452,20 @@ func TokenOrUserAuth() func(c *gin.Context) {
 	}
 }
 
+// ParseRelayAPIKey 解析 relay 请求里的 API key。
+//
+// 普通 key 支持 sk- 前缀，并允许 sk-<key>-<channelId> 形式（parts[1] 为管理员
+// 指定的渠道）。TOKEN PLAN 专用 key 以 token- 开头，必须整串保留——若按 "-"
+// 切分会退化成字面量 "token"，永远查不到记录。
+func ParseRelayAPIKey(raw string) (string, []string) {
+	if strings.HasPrefix(raw, model.TokenPlanKeyPrefix) {
+		return raw, []string{raw}
+	}
+	key := strings.TrimPrefix(raw, "sk-")
+	parts := strings.Split(key, "-")
+	return parts[0], parts
+}
+
 // TokenAuthReadOnly 宽松版本的令牌认证中间件，用于只读查询接口。
 // 只验证令牌 key 是否存在，不检查过期时间和额度。
 // 即使令牌已过期或已耗尽，也允许访问；已禁用的令牌会被拒绝。
@@ -467,9 +481,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
 			key = strings.TrimSpace(key[7:])
 		}
-		key = strings.TrimPrefix(key, "sk-")
-		parts := strings.Split(key, "-")
-		key = parts[0]
+		key, _ = ParseRelayAPIKey(key)
 
 		token, err := model.GetTokenByKey(key, false)
 		if err != nil {
@@ -561,13 +573,9 @@ func TokenAuth() func(c *gin.Context) {
 			if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
 				key = strings.TrimSpace(key[7:])
 			}
-			key = strings.TrimPrefix(key, "sk-")
-			parts = strings.Split(key, "-")
-			key = parts[0]
+			key, parts = ParseRelayAPIKey(key)
 		} else {
-			key = strings.TrimPrefix(key, "sk-")
-			parts = strings.Split(key, "-")
-			key = parts[0]
+			key, parts = ParseRelayAPIKey(key)
 		}
 		token, err := model.ValidateUserToken(key)
 		if token != nil {
@@ -690,6 +698,10 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
+	// TOKEN PLAN 专用密钥：把套餐实例 id 放进 context，供闸门中间件与计费旁路使用。
+	if token.TokenPlanId != nil && *token.TokenPlanId > 0 {
+		common.SetContextKey(c, constant.ContextKeyTokenPlanId, *token.TokenPlanId)
+	}
 	if token.AutoGroups != "" {
 		autoGroups, err := token.GetAutoGroups()
 		if err != nil {

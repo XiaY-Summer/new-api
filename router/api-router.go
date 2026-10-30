@@ -204,6 +204,27 @@ func SetApiRouter(router *gin.Engine) {
 			subscriptionAdminRoute.DELETE("/user_subscriptions/:id", controller.AdminDeleteUserSubscription)
 		}
 
+		// TOKEN PLAN（token 套餐 + 5h/7d 锚定式滚动窗口）
+		tokenPlanRoute := apiRouter.Group("/token-plan")
+		tokenPlanRoute.Use(middleware.UserAuth())
+		{
+			tokenPlanRoute.GET("/plans", controller.GetTokenPlanPlans)
+			tokenPlanRoute.GET("/self", controller.GetTokenPlanSelf)
+			tokenPlanRoute.POST("/purchase", middleware.CriticalRateLimit(), controller.PurchaseTokenPlan)
+			tokenPlanRoute.POST("/key/reset", middleware.CriticalRateLimit(), controller.ResetTokenPlanKey)
+		}
+		tokenPlanAdminRoute := apiRouter.Group("/token-plan/admin")
+		tokenPlanAdminRoute.Use(middleware.AdminAuth())
+		{
+			tokenPlanAdminRoute.GET("/plans", controller.AdminListTokenPlans)
+			tokenPlanAdminRoute.POST("/plans", controller.AdminCreateTokenPlan)
+			tokenPlanAdminRoute.PUT("/plans/:id", controller.AdminUpdateTokenPlan)
+			tokenPlanAdminRoute.DELETE("/plans/:id", controller.AdminDeleteTokenPlan)
+			tokenPlanAdminRoute.GET("/group-models", controller.AdminGetTokenPlanGroupModels)
+			tokenPlanAdminRoute.GET("/subscribers", controller.AdminListTokenPlanSubscribers)
+			tokenPlanAdminRoute.POST("/reset-usage", controller.AdminResetTokenPlanUsage)
+		}
+
 		// Subscription payment callbacks (no auth)
 		apiRouter.POST("/subscription/epay/notify", anonymousRequestBodyLimit, controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)
