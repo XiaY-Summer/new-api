@@ -220,6 +220,9 @@ func SetApiRouter(router *gin.Engine) {
 			tokenPlanAdminRoute.POST("/plans", controller.AdminCreateTokenPlan)
 			tokenPlanAdminRoute.PUT("/plans/:id", controller.AdminUpdateTokenPlan)
 			tokenPlanAdminRoute.DELETE("/plans/:id", controller.AdminDeleteTokenPlan)
+			tokenPlanAdminRoute.GET("/group-models", controller.AdminGetTokenPlanGroupModels)
+			tokenPlanAdminRoute.GET("/subscribers", controller.AdminListTokenPlanSubscribers)
+			tokenPlanAdminRoute.POST("/reset-usage", controller.AdminResetTokenPlanUsage)
 		}
 
 		// Subscription payment callbacks (no auth)

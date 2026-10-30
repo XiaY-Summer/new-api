@@ -1,13 +1,97 @@
 package controller
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
+
+// ---- 套餐 DTO ----
+//
+// 窗口时长在数据库里以秒存储（内部窗口序号推导按秒计算），对外统一用分钟：
+// 管理员填 18000 这种数字既容易算错，也看不出是多久。
+
+type TokenPlanView struct {
+	Id       int    `json:"id"`
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle"`
+
+	PriceAmount float64 `json:"price_amount"`
+	Currency    string  `json:"currency"`
+
+	DurationDays int   `json:"duration_days"`
+	TotalTokens  int64 `json:"total_tokens"`
+
+	Window1Minutes int   `json:"window1_minutes"`
+	Window1Tokens  int64 `json:"window1_tokens"`
+	Window2Minutes int   `json:"window2_minutes"`
+	Window2Tokens  int64 `json:"window2_tokens"`
+
+	MeteringMode string `json:"metering_mode"`
+	ModelLimits  string `json:"model_limits"`
+	GroupLimits  string `json:"group_limits"`
+
+	Enabled   bool  `json:"enabled"`
+	CreatedAt int64 `json:"created_at"`
+	UpdatedAt int64 `json:"updated_at"`
+}
+
+func newTokenPlanView(p *model.TokenPlan) TokenPlanView {
+	return TokenPlanView{
+		Id:             p.Id,
+		Title:          p.Title,
+		Subtitle:       p.Subtitle,
+		PriceAmount:    p.PriceAmount,
+		Currency:       p.Currency,
+		DurationDays:   p.DurationDays,
+		TotalTokens:    p.TotalTokens,
+		Window1Minutes: int(p.Window1Seconds / 60),
+		Window1Tokens:  p.Window1Tokens,
+		Window2Minutes: int(p.Window2Seconds / 60),
+		Window2Tokens:  p.Window2Tokens,
+		MeteringMode:   p.MeteringMode,
+		ModelLimits:    p.ModelLimits,
+		GroupLimits:    p.GroupLimits,
+		Enabled:        p.Enabled,
+		CreatedAt:      p.CreatedAt,
+		UpdatedAt:      p.UpdatedAt,
+	}
+}
+
+func newTokenPlanViews(plans []*model.TokenPlan) []TokenPlanView {
+	views := make([]TokenPlanView, 0, len(plans))
+	for _, p := range plans {
+		p.NormalizeDefaults()
+		views = append(views, newTokenPlanView(p))
+	}
+	return views
+}
+
+// toModel 把 DTO 还原成数据模型。Id 由调用方决定，分钟转秒在此完成。
+func (v TokenPlanView) toModel() model.TokenPlan {
+	return model.TokenPlan{
+		Id:             v.Id,
+		Title:          v.Title,
+		Subtitle:       v.Subtitle,
+		PriceAmount:    v.PriceAmount,
+		Currency:       v.Currency,
+		DurationDays:   v.DurationDays,
+		TotalTokens:    v.TotalTokens,
+		Window1Seconds: int64(v.Window1Minutes) * 60,
+		Window1Tokens:  v.Window1Tokens,
+		Window2Seconds: int64(v.Window2Minutes) * 60,
+		Window2Tokens:  v.Window2Tokens,
+		MeteringMode:   v.MeteringMode,
+		ModelLimits:    v.ModelLimits,
+		GroupLimits:    v.GroupLimits,
+		Enabled:        v.Enabled,
+	}
+}
 
 // ---- 用户侧 ----
 
@@ -18,10 +102,7 @@ func GetTokenPlanPlans(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	for _, p := range plans {
-		p.NormalizeDefaults()
-	}
-	common.ApiSuccess(c, plans)
+	common.ApiSuccess(c, newTokenPlanViews(plans))
 }
 
 // GetTokenPlanSelf 返回当前用户套餐概览：两个窗口的用量、专用 key、可用模型。
@@ -89,6 +170,7 @@ func GetTokenPlanSelf(c *gin.Context) {
 		"windows":      []model.TokenPlanWindowView{window1, window2},
 		"key":          keyInfo,
 		"models":       models,
+		"groups":       model.SplitModelLimits(sub.GroupLimits),
 		"unrestricted": unrestricted,
 	})
 }
@@ -135,14 +217,11 @@ func AdminListTokenPlans(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	for _, p := range plans {
-		p.NormalizeDefaults()
-	}
-	common.ApiSuccess(c, plans)
+	common.ApiSuccess(c, newTokenPlanViews(plans))
 }
 
 type AdminUpsertTokenPlanRequest struct {
-	Plan model.TokenPlan `json:"plan"`
+	Plan TokenPlanView `json:"plan"`
 }
 
 func validateTokenPlan(plan *model.TokenPlan) string {
@@ -176,17 +255,18 @@ func AdminCreateTokenPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	req.Plan.Id = 0
-	req.Plan.NormalizeDefaults()
-	if msg := validateTokenPlan(&req.Plan); msg != "" {
+	plan := req.Plan.toModel()
+	plan.Id = 0
+	plan.NormalizeDefaults()
+	if msg := validateTokenPlan(&plan); msg != "" {
 		common.ApiErrorT(c, msg)
 		return
 	}
-	if err := model.DB.Create(&req.Plan).Error; err != nil {
+	if err := model.DB.Create(&plan).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, req.Plan)
+	common.ApiSuccess(c, newTokenPlanView(&plan))
 }
 
 func AdminUpdateTokenPlan(c *gin.Context) {
@@ -205,27 +285,28 @@ func AdminUpdateTokenPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	req.Plan.NormalizeDefaults()
-	if msg := validateTokenPlan(&req.Plan); msg != "" {
+	plan := req.Plan.toModel()
+	plan.NormalizeDefaults()
+	if msg := validateTokenPlan(&plan); msg != "" {
 		common.ApiErrorT(c, msg)
 		return
 	}
 	// 显式 updateMap：GORM 的 struct 更新会丢弃零值字段（例如把 enabled 改回 false）。
 	updates := map[string]any{
-		"title":           req.Plan.Title,
-		"subtitle":        req.Plan.Subtitle,
-		"price_amount":    req.Plan.PriceAmount,
-		"currency":        req.Plan.Currency,
-		"duration_days":   req.Plan.DurationDays,
-		"total_tokens":    req.Plan.TotalTokens,
-		"window1_seconds": req.Plan.Window1Seconds,
-		"window1_tokens":  req.Plan.Window1Tokens,
-		"window2_seconds": req.Plan.Window2Seconds,
-		"window2_tokens":  req.Plan.Window2Tokens,
-		"metering_mode":   req.Plan.MeteringMode,
-		"model_limits":    req.Plan.ModelLimits,
-		"enabled":         req.Plan.Enabled,
-		"sort_order":      req.Plan.SortOrder,
+		"title":           plan.Title,
+		"subtitle":        plan.Subtitle,
+		"price_amount":    plan.PriceAmount,
+		"currency":        plan.Currency,
+		"duration_days":   plan.DurationDays,
+		"total_tokens":    plan.TotalTokens,
+		"window1_seconds": plan.Window1Seconds,
+		"window1_tokens":  plan.Window1Tokens,
+		"window2_seconds": plan.Window2Seconds,
+		"window2_tokens":  plan.Window2Tokens,
+		"metering_mode":   plan.MeteringMode,
+		"model_limits":    plan.ModelLimits,
+		"group_limits":    plan.GroupLimits,
+		"enabled":         plan.Enabled,
 		"updated_at":      common.GetTimestamp(),
 	}
 	if err := model.DB.Model(&model.TokenPlan{}).Where("id = ?", existing.Id).Updates(updates).Error; err != nil {
@@ -237,7 +318,7 @@ func AdminUpdateTokenPlan(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, updated)
+	common.ApiSuccess(c, newTokenPlanView(updated))
 }
 
 func AdminDeleteTokenPlan(c *gin.Context) {
@@ -251,4 +332,51 @@ func AdminDeleteTokenPlan(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, nil)
+}
+
+// AdminGetTokenPlanGroupModels 返回「分组 -> 可用模型」的映射，供套餐表单按分组带入模型。
+// 一次返回全部分组，前端切换分组时不必再请求。
+func AdminGetTokenPlanGroupModels(c *gin.Context) {
+	groups := ratio_setting.GetGroupRatioCopy()
+	result := make(map[string][]string, len(groups))
+	for name := range groups {
+		models := model.GetGroupEnabledModels(name)
+		sort.Strings(models)
+		if models == nil {
+			models = []string{}
+		}
+		result[name] = models
+	}
+	common.ApiSuccess(c, result)
+}
+
+// AdminListTokenPlanSubscribers 返回生效中的订阅列表，供管理端查看与重置用量。
+func AdminListTokenPlanSubscribers(c *gin.Context) {
+	subs, err := model.GetTokenPlanSubscribers()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, subs)
+}
+
+type AdminResetTokenPlanUsageRequest struct {
+	// UserId 为 0 或缺省表示重置全体用户。
+	UserId int `json:"user_id"`
+}
+
+// AdminResetTokenPlanUsage 清零套餐用量并重置窗口锚点。
+func AdminResetTokenPlanUsage(c *gin.Context) {
+	var req AdminResetTokenPlanUsageRequest
+	_ = c.ShouldBindJSON(&req)
+	if req.UserId < 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	affected, err := model.ResetTokenPlanUsage(req.UserId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"affected": affected})
 }

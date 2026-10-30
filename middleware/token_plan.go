@@ -65,6 +65,25 @@ func TokenPlanGuard() gin.HandlerFunc {
 			return
 		}
 
+		// 分组限制：套餐限定了分组时，请求实际使用的分组必须在列表内。
+		// 分组由 TokenAuth 在进入本中间件前写入 context。
+		if allowed := model.SplitModelLimits(sub.GroupLimits); len(allowed) > 0 {
+			usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+			matched := false
+			for _, group := range allowed {
+				if group == usingGroup {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				abortWithOpenAiMessage(c, http.StatusForbidden,
+					i18n.T(c, i18n.MsgTokenPlanGroupForbidden, map[string]any{"Group": usingGroup}),
+					types.ErrorCodeInsufficientUserQuota)
+				return
+			}
+		}
+
 		common.SetContextKey(c, constant.ContextKeyTokenPlanMetering, sub.MeteringMode)
 		c.Next()
 	}

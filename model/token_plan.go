@@ -59,9 +59,12 @@ type TokenPlan struct {
 	// ModelLimits 可用模型，逗号分隔，空 = 不限。
 	ModelLimits string `json:"model_limits" gorm:"type:text"`
 
+	// GroupLimits 可用分组，逗号分隔，空 = 不限。
+	// 请求时校验 token 实际使用的分组是否在此列表内。
+	GroupLimits string `json:"group_limits" gorm:"type:text"`
+
 	// Enabled 默认 false：GORM 创建时会忽略零值字段，只有列默认值同为 false 才能正确落库。
 	Enabled   bool  `json:"enabled" gorm:"not null;default:false"`
-	SortOrder int   `json:"sort_order" gorm:"type:int;not null;default:0"`
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
 }
@@ -101,6 +104,11 @@ func (p *TokenPlan) ModelLimitList() []string {
 	return SplitModelLimits(p.ModelLimits)
 }
 
+// GroupLimitList 把逗号分隔的分组限制拆成切片，空值返回 nil（表示不限）。
+func (p *TokenPlan) GroupLimitList() []string {
+	return SplitModelLimits(p.GroupLimits)
+}
+
 func SplitModelLimits(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -134,6 +142,7 @@ type UserTokenPlan struct {
 	Window2Tokens  int64  `json:"window2_tokens" gorm:"type:bigint;not null;default:0"`
 	MeteringMode   string `json:"metering_mode" gorm:"type:varchar(16);default:'weighted'"`
 	ModelLimits    string `json:"model_limits" gorm:"type:text"`
+	GroupLimits    string `json:"group_limits" gorm:"type:text"`
 
 	// AnchorAt 首次使用时间，0 表示尚未开始计时。
 	AnchorAt int64 `json:"anchor_at" gorm:"type:bigint;not null;default:0"`
@@ -296,15 +305,18 @@ func WeightedTokens(detail TokenPlanUsageDetail, meteringMode string) int64 {
 
 // ---- 查询 ----
 
+// GetEnabledTokenPlans 返回上架中的套餐，按价格升序——低档位在前，
+// 与用户端「从便宜到贵」的浏览顺序一致。原先靠 sort_order 手工排序，
+// 只有三个套餐时这个字段既容易填错又看不出效果，已移除。
 func GetEnabledTokenPlans() ([]*TokenPlan, error) {
 	var plans []*TokenPlan
-	err := DB.Where("enabled = ?", true).Order("sort_order desc, id asc").Find(&plans).Error
+	err := DB.Where("enabled = ?", true).Order("price_amount asc, id asc").Find(&plans).Error
 	return plans, err
 }
 
 func GetAllTokenPlans() ([]*TokenPlan, error) {
 	var plans []*TokenPlan
-	err := DB.Order("sort_order desc, id asc").Find(&plans).Error
+	err := DB.Order("price_amount asc, id asc").Find(&plans).Error
 	return plans, err
 }
 
@@ -408,7 +420,13 @@ func GenerateTokenPlanKey() (string, error) {
 }
 
 // PurchaseTokenPlan 是占位版的购买流程：不接支付，直接为当前用户开通套餐。
-// 已有生效套餐时旧记录置为 cancelled 并复用原专用 key（key id 不变，仅重写 key 串）。
+//
+// 三种情形：
+//   - 同套餐续费：在原记录上累加有效期与总额度，已用用量保留；
+//   - 升级（目标额度更高）：作废旧套餐，新建记录；
+//   - 降级（目标额度更低）：拒绝，避免高挡位被一次误点覆盖。
+//
+// 无论哪种情形都复用该用户已有的专用 key（key id 不变）。
 func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 	plan, err := GetTokenPlanById(planId)
 	if err != nil {
@@ -420,15 +438,65 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 	plan.NormalizeDefaults()
 
 	now := common.GetTimestamp()
+	extendSeconds := int64(plan.DurationDays) * 86400
+
 	var result *UserTokenPlan
 	var resultToken *Token
 
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		// 作废旧套餐
-		if err := tx.Model(&UserTokenPlan{}).
+		var current UserTokenPlan
+		currentErr := lockForUpdate(tx).
 			Where("user_id = ? AND status = ?", userId, TokenPlanStatusActive).
-			Updates(map[string]any{"status": TokenPlanStatusCancelled, "updated_time": now}).Error; err != nil {
-			return err
+			Order("id desc").
+			First(&current).Error
+		if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
+			return currentErr
+		}
+		hasCurrent := currentErr == nil
+		stillValid := hasCurrent && current.EndTime > now
+
+		// 同套餐续费：累加时长与总额度，而不是把到期时间重置成「现在 + 一个月」。
+		if hasCurrent && current.PlanId == plan.Id {
+			newEnd := current.EndTime + extendSeconds
+			// 已过期的套餐从当前时间重新起算，否则会累加出「续了费还是过期」的结果。
+			if !stillValid {
+				newEnd = now + extendSeconds
+			}
+			if err := tx.Model(&UserTokenPlan{}).Where("id = ?", current.Id).Updates(map[string]any{
+				"total_tokens": gorm.Expr("total_tokens + ?", plan.TotalTokens),
+				"end_time":     newEnd,
+				"status":       TokenPlanStatusActive,
+				"updated_time": now,
+			}).Error; err != nil {
+				return err
+			}
+			current.TotalTokens += plan.TotalTokens
+			current.EndTime = newEnd
+			current.Status = TokenPlanStatusActive
+
+			token, tokenErr := bindTokenPlanKey(tx, userId, current.Id, now)
+			if tokenErr != nil {
+				return tokenErr
+			}
+			current.TokenId = token.Id
+
+			result = &current
+			resultToken = token
+			return nil
+		}
+
+		// 降级拦截：当前套餐仍在有效期内且额度更高时不允许被覆盖。
+		if stillValid && current.TotalTokens > plan.TotalTokens {
+			return errors.New("当前套餐额度高于目标套餐，暂不支持降级；如需降级请先联系管理员")
+		}
+
+		// 作废旧套餐
+		if hasCurrent {
+			if err := tx.Model(&UserTokenPlan{}).
+				Where("id = ?", current.Id).
+				Updates(map[string]any{"status": TokenPlanStatusCancelled, "updated_time": now}).Error; err != nil {
+				return err
+			}
 		}
 
 		sub := &UserTokenPlan{
@@ -442,65 +510,128 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 			Window2Tokens:  plan.Window2Tokens,
 			MeteringMode:   plan.MeteringMode,
 			ModelLimits:    plan.ModelLimits,
+			GroupLimits:    plan.GroupLimits,
 			StartTime:      now,
-			EndTime:        now + int64(plan.DurationDays)*86400,
+			EndTime:        now + extendSeconds,
 			Status:         TokenPlanStatusActive,
 		}
 		if err := tx.Create(sub).Error; err != nil {
 			return err
 		}
 
-		// 复用该用户已有的专用 key，没有则新建
-		var token Token
-		tokenErr := tx.Where("user_id = ? AND token_plan_id IS NOT NULL", userId).Order("id asc").First(&token).Error
-		if tokenErr != nil && !errors.Is(tokenErr, gorm.ErrRecordNotFound) {
+		token, tokenErr := bindTokenPlanKey(tx, userId, sub.Id, now)
+		if tokenErr != nil {
 			return tokenErr
-		}
-		if errors.Is(tokenErr, gorm.ErrRecordNotFound) {
-			newKey, keyErr := GenerateTokenPlanKey()
-			if keyErr != nil {
-				return keyErr
-			}
-			token = Token{
-				UserId:         userId,
-				Key:            newKey,
-				Status:         common.TokenStatusEnabled,
-				Name:           "TOKEN PLAN 专用密钥",
-				CreatedTime:    now,
-				AccessedTime:   now,
-				ExpiredTime:    -1,
-				RemainQuota:    0,
-				UnlimitedQuota: true,
-				Group:          "",
-			}
-			if err := tx.Create(&token).Error; err != nil {
-				return err
-			}
-		}
-		planIdCopy := sub.Id
-		if token.Key != "" {
-			_ = invalidateTokenCacheForMutation(token.Key)
-		}
-		if err := tx.Model(&Token{}).Where("id = ?", token.Id).
-			Updates(map[string]any{"token_plan_id": planIdCopy, "unlimited_quota": true, "status": common.TokenStatusEnabled}).Error; err != nil {
-			return err
-		}
-		token.TokenPlanId = &planIdCopy
-
-		if err := tx.Model(&UserTokenPlan{}).Where("id = ?", sub.Id).
-			Update("token_id", token.Id).Error; err != nil {
-			return err
 		}
 		sub.TokenId = token.Id
 
 		result = sub
-		resultToken = &token
+		resultToken = token
 		return nil
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return result, resultToken, nil
+}
+
+// bindTokenPlanKey 复用该用户已有的专用 key（没有则新建），并把它绑定到指定套餐记录。
+func bindTokenPlanKey(tx *gorm.DB, userId int, userPlanId int, now int64) (*Token, error) {
+	var token Token
+	tokenErr := tx.Where("user_id = ? AND token_plan_id IS NOT NULL", userId).Order("id asc").First(&token).Error
+	if tokenErr != nil && !errors.Is(tokenErr, gorm.ErrRecordNotFound) {
+		return nil, tokenErr
+	}
+	if errors.Is(tokenErr, gorm.ErrRecordNotFound) {
+		newKey, keyErr := GenerateTokenPlanKey()
+		if keyErr != nil {
+			return nil, keyErr
+		}
+		token = Token{
+			UserId:         userId,
+			Key:            newKey,
+			Status:         common.TokenStatusEnabled,
+			Name:           "TOKEN PLAN 专用密钥",
+			CreatedTime:    now,
+			AccessedTime:   now,
+			ExpiredTime:    -1,
+			RemainQuota:    0,
+			UnlimitedQuota: true,
+			Group:          "",
+		}
+		if err := tx.Create(&token).Error; err != nil {
+			return nil, err
+		}
+	}
+	// 旧 key 的缓存必须在写库前失效，否则它在 TTL 内仍会按旧的 token_plan_id 放行。
+	if token.Key != "" {
+		_ = invalidateTokenCacheForMutation(token.Key)
+	}
+	planIdCopy := userPlanId
+	if err := tx.Model(&Token{}).Where("id = ?", token.Id).
+		Updates(map[string]any{"token_plan_id": planIdCopy, "unlimited_quota": true, "status": common.TokenStatusEnabled}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Model(&UserTokenPlan{}).Where("id = ?", userPlanId).
+		Update("token_id", token.Id).Error; err != nil {
+		return nil, err
+	}
+	token.TokenPlanId = &planIdCopy
+	return &token, nil
+}
+
+// ResetTokenPlanUsage 清零套餐用量并重置窗口锚点。userId <= 0 表示全体用户。
+// 锚点归零后，下一次请求会重新落锚点，两个窗口从头开始计时。
+func ResetTokenPlanUsage(userId int) (int64, error) {
+	now := common.GetTimestamp()
+	query := DB.Model(&UserTokenPlan{}).Where("status = ?", TokenPlanStatusActive)
+	if userId > 0 {
+		query = query.Where("user_id = ?", userId)
+	}
+	result := query.Updates(map[string]any{
+		"used_tokens":   0,
+		"window1_used":  0,
+		"window2_used":  0,
+		"window1_index": 0,
+		"window2_index": 0,
+		"anchor_at":     0,
+		"updated_time":  now,
+	})
+	return result.RowsAffected, result.Error
+}
+
+// TokenPlanSubscriberView 是管理端「已订阅用户」列表的一行。
+type TokenPlanSubscriberView struct {
+	UserId       int    `json:"user_id" gorm:"column:user_id"`
+	Username     string `json:"username" gorm:"column:username"`
+	PlanTitle    string `json:"plan_title" gorm:"column:plan_title"`
+	Status       string `json:"status" gorm:"column:status"`
+	TotalTokens  int64  `json:"total_tokens" gorm:"column:total_tokens"`
+	UsedTokens   int64  `json:"used_tokens" gorm:"column:used_tokens"`
+	Window1Used  int64  `json:"window1_used" gorm:"column:window1_used"`
+	Window1Limit int64  `json:"window1_limit" gorm:"column:window1_limit"`
+	Window2Used  int64  `json:"window2_used" gorm:"column:window2_used"`
+	Window2Limit int64  `json:"window2_limit" gorm:"column:window2_limit"`
+	StartTime    int64  `json:"start_time" gorm:"column:start_time"`
+	EndTime      int64  `json:"end_time" gorm:"column:end_time"`
+}
+
+// GetTokenPlanSubscribers 返回当前生效中的订阅列表（含用户名），供管理端重置用量。
+func GetTokenPlanSubscribers() ([]*TokenPlanSubscriberView, error) {
+	now := common.GetTimestamp()
+	views := make([]*TokenPlanSubscriberView, 0)
+	err := DB.Table("user_token_plans AS p").
+		Select("p.user_id, COALESCE(u.username, '') AS username, p.plan_title, p.status, "+
+			"p.total_tokens, p.used_tokens, p.window1_used, p.window1_tokens AS window1_limit, "+
+			"p.window2_used, p.window2_tokens AS window2_limit, p.start_time, p.end_time").
+		Joins("LEFT JOIN users AS u ON u.id = p.user_id").
+		Where("p.status = ? AND p.end_time > ?", TokenPlanStatusActive, now).
+		Order("p.id desc").
+		Scan(&views).Error
+	if err != nil {
+		return nil, err
+	}
+	return views, nil
 }
 
 // ResetTokenPlanKey 为当前用户重新生成专用 key（原地更新，保持 key id 与套餐绑定不变）。
@@ -551,7 +682,7 @@ func EnsureTokenPlanSeed() error {
 			TotalTokens:    5_000_000,
 			Window1Seconds: DefaultTokenPlanWindow1Seconds, Window1Tokens: 1_000_000,
 			Window2Seconds: DefaultTokenPlanWindow2Seconds, Window2Tokens: 3_000_000,
-			MeteringMode: TokenPlanMeteringWeighted, Enabled: true, SortOrder: 30,
+			MeteringMode: TokenPlanMeteringWeighted, Enabled: true,
 		},
 		{
 			Title: "PRO", Subtitle: "主力档位，覆盖大部分开发场景",
@@ -559,7 +690,7 @@ func EnsureTokenPlanSeed() error {
 			TotalTokens:    15_000_000,
 			Window1Seconds: DefaultTokenPlanWindow1Seconds, Window1Tokens: 3_000_000,
 			Window2Seconds: DefaultTokenPlanWindow2Seconds, Window2Tokens: 9_000_000,
-			MeteringMode: TokenPlanMeteringWeighted, Enabled: true, SortOrder: 20,
+			MeteringMode: TokenPlanMeteringWeighted, Enabled: true,
 		},
 		{
 			Title: "MAX", Subtitle: "高强度使用，长上下文与批量任务",
@@ -567,7 +698,7 @@ func EnsureTokenPlanSeed() error {
 			TotalTokens:    40_000_000,
 			Window1Seconds: DefaultTokenPlanWindow1Seconds, Window1Tokens: 8_000_000,
 			Window2Seconds: DefaultTokenPlanWindow2Seconds, Window2Tokens: 25_000_000,
-			MeteringMode: TokenPlanMeteringWeighted, Enabled: true, SortOrder: 10,
+			MeteringMode: TokenPlanMeteringWeighted, Enabled: true,
 		},
 	}
 	for i := range presets {

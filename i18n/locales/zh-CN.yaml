@@ -34,6 +34,7 @@ token_plan.window_exhausted: "TOKEN PLAN 的 {{.Window}} 额度已用尽，将�
 token_plan.total_exhausted: "TOKEN PLAN 总额度已用尽，请重新订阅"
 token_plan.expired: "TOKEN PLAN 已过期，请重新订阅"
 token_plan.not_found: "当前没有生效中的 TOKEN PLAN"
+token_plan.group_forbidden: "当前 TOKEN PLAN 不包含 {{.Group}} 分组，请订阅包含该分组的套餐"
 relay.model_price_not_configured: "模型 {{.Model}} 的价格尚未由管理员配置，暂时无法使用，请联系站点管理员开启该模型；Model {{.Model}} has not been priced by the administrator yet. Please contact the site administrator to enable this model."
 relay.model_price_not_configured_admin: "模型 {{.Model}} 的价格未配置。请前往「系统设置 → 运营设置」开启自用模式，或在「系统设置 → 分组与模型定价设置」中为该模型配置价格；Model {{.Model}} price not configured. Go to System Settings → Operation Settings to enable self-use mode, or configure the model price in System Settings → Group & Model Pricing."
 relay.task_usage_price_unsupported: "模型 {{.Model}} 使用了任务用量表达式；请为普通转发配置常规定价，并为插件单独配置计费表达式"

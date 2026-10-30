@@ -42,6 +42,7 @@ const (
 	MsgTokenPlanTotalExhausted           = "token_plan.total_exhausted"
 	MsgTokenPlanExpired                  = "token_plan.expired"
 	MsgTokenPlanNotFound                 = "token_plan.not_found"
+	MsgTokenPlanGroupForbidden           = "token_plan.group_forbidden"
 	MsgRelayModelPriceNotConfigured      = "relay.model_price_not_configured"
 	MsgRelayModelPriceNotConfiguredAdmin = "relay.model_price_not_configured_admin"
 	MsgRelayTaskUsagePriceUnsupported    = "relay.task_usage_price_unsupported"
