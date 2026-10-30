@@ -73,8 +73,22 @@ export function PlanCards({
     )
   }
 
+  // 列数跟随实际套餐数量，避免只有一两个套餐时右侧留出一大片空白。
+  const columnClass = [
+    'md:grid-cols-1',
+    'md:grid-cols-1',
+    'md:grid-cols-2',
+    'md:grid-cols-3',
+  ][Math.min(plans.length, 3)]
+
   return (
-    <div className='grid gap-4 md:grid-cols-3'>
+    <div
+      className={cn(
+        'grid gap-4',
+        columnClass,
+        plans.length === 1 && 'mx-auto w-full max-w-sm'
+      )}
+    >
       {plans.map((plan) => {
         const isCurrent = currentPlanId === plan.id
         const isPurchasing = purchasingId === plan.id
@@ -121,7 +135,8 @@ export function PlanCards({
                 <li className='flex items-start gap-2'>
                   <Check className='text-success mt-0.5 h-3.5 w-3.5 shrink-0' />
                   <span>
-                    {formatWindowDuration(plan.window1_seconds)} {t('window')}:{' '}
+                    {formatWindowDuration(plan.window1_minutes * 60)}{' '}
+                    {t('window')}:{' '}
                     <span className='font-medium tabular-nums'>
                       {formatNumber(plan.window1_tokens)}
                     </span>
@@ -130,7 +145,8 @@ export function PlanCards({
                 <li className='flex items-start gap-2'>
                   <Check className='text-success mt-0.5 h-3.5 w-3.5 shrink-0' />
                   <span>
-                    {formatWindowDuration(plan.window2_seconds)} {t('window')}:{' '}
+                    {formatWindowDuration(plan.window2_minutes * 60)}{' '}
+                    {t('window')}:{' '}
                     <span className='font-medium tabular-nums'>
                       {formatNumber(plan.window2_tokens)}
                     </span>

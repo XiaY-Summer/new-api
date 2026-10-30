@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -37,16 +37,26 @@ import {
 } from '@/components/ui/table'
 import {
   formatNumber,
+  formatUnixTime,
   formatWindowDuration,
 } from '@/features/token-plan/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
-import { deleteTokenPlan, getAdminTokenPlans } from './api'
+import {
+  deleteTokenPlan,
+  getAdminTokenPlans,
+  getTokenPlanSubscribers,
+  resetTokenPlanUsage,
+} from './api'
 import { PlanFormDialog } from './components/plan-form-dialog'
-import type { TokenPlanAdminRecord } from './types'
+import type { TokenPlanAdminRecord, TokenPlanSubscriber } from './types'
 
 const QUERY_KEY = ['token-plan-admin', 'plans']
+const SUBSCRIBERS_QUERY_KEY = ['token-plan-admin', 'subscribers']
+
+/** 重置目标：单个订阅者，或 'all' 表示全体。 */
+type ResetTarget = TokenPlanSubscriber | 'all' | null
 
 export function TokenPlans() {
   const { t } = useTranslation()
@@ -56,6 +66,8 @@ export function TokenPlans() {
   const [editing, setEditing] = useState<TokenPlanAdminRecord | null>(null)
   const [deleting, setDeleting] = useState<TokenPlanAdminRecord | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [resetTarget, setResetTarget] = useState<ResetTarget>(null)
+  const [resetting, setResetting] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: QUERY_KEY,
@@ -63,6 +75,17 @@ export function TokenPlans() {
       const result = await getAdminTokenPlans()
       if (!result.success) {
         throw createServerError(result, t('Failed to load plans'))
+      }
+      return result.data ?? []
+    },
+  })
+
+  const subscribersQuery = useQuery({
+    queryKey: SUBSCRIBERS_QUERY_KEY,
+    queryFn: async () => {
+      const result = await getTokenPlanSubscribers()
+      if (!result.success) {
+        throw createServerError(result, t('Failed to load subscribers'))
       }
       return result.data ?? []
     },
@@ -88,7 +111,31 @@ export function TokenPlans() {
     }
   }
 
+  const handleReset = async () => {
+    if (!resetTarget) return
+    setResetting(true)
+    try {
+      const userId = resetTarget === 'all' ? undefined : resetTarget.user_id
+      const result = await resetTokenPlanUsage(userId)
+      if (!result.success) {
+        throw createServerError(result, t('Failed to reset usage'))
+      }
+      toast.success(
+        t('Reset usage for {{count}} subscription(s)', {
+          count: result.data?.affected ?? 0,
+        })
+      )
+      setResetTarget(null)
+      queryClient.invalidateQueries({ queryKey: SUBSCRIBERS_QUERY_KEY })
+    } catch (error) {
+      handleServerError(error, t('Failed to reset usage'))
+    } finally {
+      setResetting(false)
+    }
+  }
+
   const plans = data ?? []
+  const subscribers = subscribersQuery.data ?? []
 
   return (
     <>
@@ -112,7 +159,7 @@ export function TokenPlans() {
           <div className='mx-auto w-full max-w-6xl pb-6'>
             <p className='text-muted-foreground mb-3 text-xs'>
               {t(
-                'These plans drive the TOKEN PLAN page. Both windows are anchored to the first request and reset every N seconds.'
+                'These plans drive the TOKEN PLAN page. Both windows are anchored to the first request and reset every N minutes.'
               )}
             </p>
 
@@ -129,11 +176,12 @@ export function TokenPlans() {
                         {t('Total quota')}
                       </TableHead>
                       <TableHead className='text-right'>
-                        {`${formatWindowDuration(plans[0]?.window1_seconds)} ${t('window')}`}
+                        {`${formatWindowDuration((plans[0]?.window1_minutes ?? 0) * 60)} ${t('window')}`}
                       </TableHead>
                       <TableHead className='text-right'>
-                        {`${formatWindowDuration(plans[0]?.window2_seconds)} ${t('window')}`}
+                        {`${formatWindowDuration((plans[0]?.window2_minutes ?? 0) * 60)} ${t('window')}`}
                       </TableHead>
+                      <TableHead>{t('Groups')}</TableHead>
                       <TableHead>{t('Metering mode')}</TableHead>
                       <TableHead>{t('Status')}</TableHead>
                       <TableHead className='text-right'>
@@ -145,7 +193,7 @@ export function TokenPlans() {
                     {plans.length === 0 ? (
                       <TableRow>
                         <TableCell
-                          colSpan={8}
+                          colSpan={9}
                           className='text-muted-foreground py-10 text-center text-sm'
                         >
                           {t('No plans yet. Create one to get started.')}
@@ -171,6 +219,9 @@ export function TokenPlans() {
                           </TableCell>
                           <TableCell className='text-right tabular-nums'>
                             {formatNumber(plan.window2_tokens)}
+                          </TableCell>
+                          <TableCell className='max-w-40 truncate text-xs'>
+                            {plan.group_limits || t('All groups')}
                           </TableCell>
                           <TableCell className='text-xs'>
                             {plan.metering_mode === 'weighted'
@@ -214,6 +265,109 @@ export function TokenPlans() {
                 </Table>
               </div>
             )}
+
+            <div className='mt-8'>
+              <div className='mb-3 flex flex-wrap items-start justify-between gap-2'>
+                <div>
+                  <h3 className='text-sm font-semibold'>{t('Subscribers')}</h3>
+                  <p className='text-muted-foreground mt-1 text-xs'>
+                    {t(
+                      'Resetting usage clears consumed tokens and restarts both windows from the next request.'
+                    )}
+                  </p>
+                </div>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  disabled={!subscribers.length}
+                  onClick={() => setResetTarget('all')}
+                >
+                  <RotateCcw className='h-4 w-4' />
+                  {t('Reset all usage')}
+                </Button>
+              </div>
+
+              {subscribersQuery.isLoading ? (
+                <Skeleton className='h-40 w-full' />
+              ) : (
+                <div className='overflow-x-auto rounded-lg border'>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('User')}</TableHead>
+                        <TableHead>{t('Plan')}</TableHead>
+                        <TableHead className='text-right'>
+                          {t('Total quota')}
+                        </TableHead>
+                        <TableHead className='text-right'>
+                          {t('Window 1')}
+                        </TableHead>
+                        <TableHead className='text-right'>
+                          {t('Window 2')}
+                        </TableHead>
+                        <TableHead>{t('Expires at')}</TableHead>
+                        <TableHead className='text-right'>
+                          {t('Actions')}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {subscribers.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={7}
+                            className='text-muted-foreground py-10 text-center text-sm'
+                          >
+                            {t('No active subscriptions yet.')}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        subscribers.map((sub) => (
+                          <TableRow key={sub.user_id}>
+                            <TableCell>
+                              <div className='font-medium'>
+                                {sub.username || `#${sub.user_id}`}
+                              </div>
+                              <div className='text-muted-foreground text-xs'>
+                                ID {sub.user_id}
+                              </div>
+                            </TableCell>
+                            <TableCell className='text-xs'>
+                              {sub.plan_title}
+                            </TableCell>
+                            <TableCell className='text-right text-xs tabular-nums'>
+                              {formatNumber(sub.used_tokens)} /{' '}
+                              {formatNumber(sub.total_tokens)}
+                            </TableCell>
+                            <TableCell className='text-right text-xs tabular-nums'>
+                              {formatNumber(sub.window1_used)} /{' '}
+                              {formatNumber(sub.window1_limit)}
+                            </TableCell>
+                            <TableCell className='text-right text-xs tabular-nums'>
+                              {formatNumber(sub.window2_used)} /{' '}
+                              {formatNumber(sub.window2_limit)}
+                            </TableCell>
+                            <TableCell className='text-xs tabular-nums'>
+                              {formatUnixTime(sub.end_time)}
+                            </TableCell>
+                            <TableCell className='text-right'>
+                              <Button
+                                variant='ghost'
+                                size='sm'
+                                onClick={() => setResetTarget(sub)}
+                              >
+                                <RotateCcw className='h-3.5 w-3.5' />
+                                {t('Reset')}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
@@ -236,6 +390,25 @@ export function TokenPlans() {
         destructive
         isLoading={removing}
         handleConfirm={handleDelete}
+      />
+
+      <ConfirmDialog
+        open={!!resetTarget}
+        onOpenChange={(open) => !open && setResetTarget(null)}
+        title={t('Reset usage')}
+        desc={
+          resetTarget === 'all'
+            ? t(
+                'This clears consumed tokens for every active subscription and restarts their windows. It cannot be undone.'
+              )
+            : t(
+                'This clears the consumed tokens of this subscription and restarts its windows. It cannot be undone.'
+              )
+        }
+        confirmText={t('Reset')}
+        destructive
+        isLoading={resetting}
+        handleConfirm={handleReset}
       />
     </>
   )

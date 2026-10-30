@@ -33,18 +33,33 @@ export interface TokenPlanAdminRecord {
   currency: string
   duration_days: number
   total_tokens: number
-  window1_seconds: number
+  window1_minutes: number
   window1_tokens: number
-  window2_seconds: number
+  window2_minutes: number
   window2_tokens: number
   metering_mode: TokenPlanMeteringMode
   model_limits: string
+  group_limits: string
   enabled: boolean
-  sort_order: number
 }
 
 export interface TokenPlanPayload {
   plan: TokenPlanAdminRecord
+}
+
+export interface TokenPlanSubscriber {
+  user_id: number
+  username: string
+  plan_title: string
+  status: string
+  total_tokens: number
+  used_tokens: number
+  window1_used: number
+  window1_limit: number
+  window2_used: number
+  window2_limit: number
+  start_time: number
+  end_time: number
 }
 
 export function emptyTokenPlan(): TokenPlanAdminRecord {
@@ -56,13 +71,13 @@ export function emptyTokenPlan(): TokenPlanAdminRecord {
     currency: 'CNY',
     duration_days: 30,
     total_tokens: 5_000_000,
-    window1_seconds: 5 * 60 * 60,
+    window1_minutes: 5 * 60,
     window1_tokens: 1_000_000,
-    window2_seconds: 7 * 24 * 60 * 60,
+    window2_minutes: 7 * 24 * 60,
     window2_tokens: 3_000_000,
     metering_mode: 'weighted',
     model_limits: '',
+    group_limits: '',
     enabled: true,
-    sort_order: 0,
   }
 }

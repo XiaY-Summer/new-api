@@ -16,12 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
+import { Wand2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -30,12 +33,31 @@ import { formatWindowDuration } from '@/features/token-plan/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
-import { createTokenPlan, updateTokenPlan } from '../api'
+import {
+  createTokenPlan,
+  getTokenPlanGroupModels,
+  updateTokenPlan,
+} from '../api'
 import {
   emptyTokenPlan,
   type TokenPlanAdminRecord,
   type TokenPlanMeteringMode,
 } from '../types'
+
+const GROUP_MODELS_QUERY_KEY = ['token-plan-admin', 'group-models']
+
+/** 逗号分隔列表 -> 去空切片。 */
+function splitList(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+/** 去重后写回逗号分隔列表。 */
+function joinList(items: string[]): string {
+  return [...new Set(items)].join(',')
+}
 
 type PlanFormDialogProps = {
   open: boolean
@@ -54,6 +76,19 @@ export function PlanFormDialog({
   const [form, setForm] = useState<TokenPlanAdminRecord>(emptyTokenPlan)
   const [saving, setSaving] = useState(false)
 
+  const groupModelsQuery = useQuery({
+    queryKey: GROUP_MODELS_QUERY_KEY,
+    queryFn: async () => {
+      const result = await getTokenPlanGroupModels()
+      if (!result.success) {
+        throw createServerError(result, t('Failed to load groups'))
+      }
+      return result.data ?? {}
+    },
+    enabled: open,
+    staleTime: 60_000,
+  })
+
   useEffect(() => {
     if (!open) return
     setForm(initial ? { ...initial } : emptyTokenPlan())
@@ -65,6 +100,74 @@ export function PlanFormDialog({
   ) => setForm((prev) => ({ ...prev, [key]: value }))
 
   const isEdit = form.id > 0
+  const groupModels = groupModelsQuery.data ?? {}
+  const groupNames = Object.keys(groupModels).sort()
+  const selectedGroups = splitList(form.group_limits)
+
+  const toggleGroup = (group: string) => {
+    const next = selectedGroups.includes(group)
+      ? selectedGroups.filter((item) => item !== group)
+      : [...selectedGroups, group]
+    set('group_limits', next.join(','))
+  }
+
+  // 把选中分组下已启用的模型并入「可用模型」，保留管理员手工加过的条目。
+  const applyGroupModels = () => {
+    if (!selectedGroups.length) {
+      toast.error(t('Select at least one group first'))
+      return
+    }
+    const picked = selectedGroups.flatMap((group) => groupModels[group] ?? [])
+    if (!picked.length) {
+      toast.error(t('The selected groups have no enabled models'))
+      return
+    }
+    const merged = joinList([...splitList(form.model_limits), ...picked])
+    set('model_limits', merged)
+    toast.success(
+      t('Filled {{count}} models from the selected groups', {
+        count: picked.length,
+      })
+    )
+  }
+
+  const groupsSection = (() => {
+    if (groupModelsQuery.isLoading) {
+      return (
+        <p className='text-muted-foreground text-[11px]'>
+          {t('Loading groups...')}
+        </p>
+      )
+    }
+    if (groupNames.length === 0) {
+      return (
+        <p className='text-muted-foreground text-[11px]'>
+          {t('No groups available')}
+        </p>
+      )
+    }
+    return (
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+        {groupNames.map((group) => (
+          <label
+            key={group}
+            htmlFor={`tp-group-${group}`}
+            className='hover:bg-muted/50 flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs'
+          >
+            <Checkbox
+              id={`tp-group-${group}`}
+              checked={selectedGroups.includes(group)}
+              onCheckedChange={() => toggleGroup(group)}
+            />
+            <span className='min-w-0 flex-1 truncate font-medium'>{group}</span>
+            <span className='text-muted-foreground tabular-nums'>
+              {(groupModels[group] ?? []).length}
+            </span>
+          </label>
+        ))}
+      </div>
+    )
+  })()
 
   const handleSave = async () => {
     if (!form.title.trim()) {
@@ -95,8 +198,9 @@ export function PlanFormDialog({
       onOpenChange={onOpenChange}
       title={isEdit ? t('Edit plan') : t('Create plan')}
       description={t(
-        'Both windows are anchored to the first request of the plan and reset every N seconds.'
+        'Both windows are anchored to the first request of the plan and reset every N minutes.'
       )}
+      contentClassName='sm:max-w-3xl'
       footer={
         <div className='flex justify-end gap-2'>
           <Button variant='outline' onClick={() => onOpenChange(false)}>
@@ -157,17 +261,17 @@ export function PlanFormDialog({
         </div>
 
         <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='tp-w1-seconds'>
-            {t('Window 1 duration (seconds)')}
+          <Label htmlFor='tp-w1-minutes'>
+            {t('Window 1 duration (minutes)')}
           </Label>
           <Input
-            id='tp-w1-seconds'
+            id='tp-w1-minutes'
             type='number'
-            value={form.window1_seconds}
-            onChange={(e) => set('window1_seconds', Number(e.target.value))}
+            value={form.window1_minutes}
+            onChange={(e) => set('window1_minutes', Number(e.target.value))}
           />
           <p className='text-muted-foreground text-[11px]'>
-            = {formatWindowDuration(form.window1_seconds)}
+            = {formatWindowDuration(form.window1_minutes * 60)}
           </p>
         </div>
         <div className='flex flex-col gap-1.5'>
@@ -181,17 +285,17 @@ export function PlanFormDialog({
         </div>
 
         <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='tp-w2-seconds'>
-            {t('Window 2 duration (seconds)')}
+          <Label htmlFor='tp-w2-minutes'>
+            {t('Window 2 duration (minutes)')}
           </Label>
           <Input
-            id='tp-w2-seconds'
+            id='tp-w2-minutes'
             type='number'
-            value={form.window2_seconds}
-            onChange={(e) => set('window2_seconds', Number(e.target.value))}
+            value={form.window2_minutes}
+            onChange={(e) => set('window2_minutes', Number(e.target.value))}
           />
           <p className='text-muted-foreground text-[11px]'>
-            = {formatWindowDuration(form.window2_seconds)}
+            = {formatWindowDuration(form.window2_minutes * 60)}
           </p>
         </div>
         <div className='flex flex-col gap-1.5'>
@@ -222,14 +326,35 @@ export function PlanFormDialog({
             </NativeSelectOption>
           </NativeSelect>
         </div>
-        <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='tp-sort'>{t('Sort order')}</Label>
-          <Input
-            id='tp-sort'
-            type='number'
-            value={form.sort_order}
-            onChange={(e) => set('sort_order', Number(e.target.value))}
+        <div className='flex items-end gap-2 pb-1'>
+          <Switch
+            id='tp-enabled'
+            checked={form.enabled}
+            onCheckedChange={(checked) => set('enabled', checked)}
           />
+          <Label htmlFor='tp-enabled'>{t('Enabled')}</Label>
+        </div>
+
+        <div className='flex flex-col gap-2 sm:col-span-2'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <Label>{t('Available groups')}</Label>
+            <Button
+              type='button'
+              variant='outline'
+              size='xs'
+              disabled={!selectedGroups.length || groupModelsQuery.isLoading}
+              onClick={applyGroupModels}
+            >
+              <Wand2 className='h-3.5 w-3.5' />
+              {t('Fill models from groups')}
+            </Button>
+          </div>
+          {groupsSection}
+          <p className='text-muted-foreground text-[11px]'>
+            {t(
+              'Leave empty to allow every group. Requests from other groups are rejected.'
+            )}
+          </p>
         </div>
 
         <div className='flex flex-col gap-1.5 sm:col-span-2'>
@@ -243,15 +368,6 @@ export function PlanFormDialog({
           <p className='text-muted-foreground text-[11px]'>
             {t('Comma separated. Leave empty to allow every enabled model.')}
           </p>
-        </div>
-
-        <div className='flex items-center gap-2 sm:col-span-2'>
-          <Switch
-            id='tp-enabled'
-            checked={form.enabled}
-            onCheckedChange={(checked) => set('enabled', checked)}
-          />
-          <Label htmlFor='tp-enabled'>{t('Enabled')}</Label>
         </div>
       </div>
     </Dialog>

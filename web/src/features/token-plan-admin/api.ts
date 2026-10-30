@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { ApiResponse, TokenPlanAdminRecord } from './types'
+import type {
+  ApiResponse,
+  TokenPlanAdminRecord,
+  TokenPlanSubscriber,
+} from './types'
 
 export async function getAdminTokenPlans(): Promise<
   ApiResponse<TokenPlanAdminRecord[]>
@@ -43,5 +47,30 @@ export async function updateTokenPlan(
 
 export async function deleteTokenPlan(id: number): Promise<ApiResponse> {
   const res = await api.delete(`/api/token-plan/admin/plans/${id}`)
+  return res.data
+}
+
+/** 分组 -> 该分组下已启用的模型列表。 */
+export async function getTokenPlanGroupModels(): Promise<
+  ApiResponse<Record<string, string[]>>
+> {
+  const res = await api.get('/api/token-plan/admin/group-models')
+  return res.data
+}
+
+export async function getTokenPlanSubscribers(): Promise<
+  ApiResponse<TokenPlanSubscriber[]>
+> {
+  const res = await api.get('/api/token-plan/admin/subscribers')
+  return res.data
+}
+
+/** userId 为空表示重置全体用户。 */
+export async function resetTokenPlanUsage(
+  userId?: number
+): Promise<ApiResponse<{ affected: number }>> {
+  const res = await api.post('/api/token-plan/admin/reset-usage', {
+    user_id: userId ?? 0,
+  })
   return res.data
 }

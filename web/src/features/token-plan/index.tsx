@@ -141,6 +141,14 @@ export function TokenPlan() {
     />
   )
 
+  // 弹窗宽度跟着套餐数量走，一两个套餐时不会留下大片空白。
+  const plansDialogWidth = [
+    'sm:max-w-md',
+    'sm:max-w-md',
+    'sm:max-w-3xl',
+    'sm:max-w-5xl',
+  ][Math.min(plansQuery.data?.length ?? 0, 3)]
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>TOKEN PLAN</SectionPageLayout.Title>
@@ -198,7 +206,7 @@ export function TokenPlan() {
           description={t(
             'Switching plans cancels the current one immediately. Unused quota is not carried over.'
           )}
-          contentClassName='sm:max-w-5xl'
+          contentClassName={plansDialogWidth}
         >
           {planCards}
         </Dialog>

@@ -33,14 +33,14 @@ export interface TokenPlan {
   currency: string
   duration_days: number
   total_tokens: number
-  window1_seconds: number
+  window1_minutes: number
   window1_tokens: number
-  window2_seconds: number
+  window2_minutes: number
   window2_tokens: number
   metering_mode: TokenPlanMeteringMode
   model_limits: string
+  group_limits: string
   enabled: boolean
-  sort_order: number
 }
 
 export interface TokenPlanWindow {
