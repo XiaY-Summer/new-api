@@ -216,6 +216,22 @@ export function PlanFormDialog({
       }
     >
       <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+        <div className='flex items-center justify-between gap-3 rounded-md border px-3 py-2 sm:col-span-2'>
+          <div className='flex flex-col gap-0.5'>
+            <Label htmlFor='tp-enabled'>{t('Enabled')}</Label>
+            <p className='text-muted-foreground text-[11px]'>
+              {t(
+                'Disabled plans stay visible to existing subscribers but cannot be purchased.'
+              )}
+            </p>
+          </div>
+          <Switch
+            id='tp-enabled'
+            checked={form.enabled}
+            onCheckedChange={(checked) => set('enabled', checked)}
+          />
+        </div>
+
         <div className='flex flex-col gap-1.5'>
           <Label htmlFor='tp-title'>{t('Title')}</Label>
           <Input
@@ -253,7 +269,7 @@ export function PlanFormDialog({
           />
         </div>
 
-        <div className='flex flex-col gap-1.5 sm:col-span-2'>
+        <div className='flex flex-col gap-1.5'>
           <Label htmlFor='tp-total'>{t('Total token quota')}</Label>
           <Input
             id='tp-total'
@@ -261,6 +277,24 @@ export function PlanFormDialog({
             value={form.total_tokens}
             onChange={(e) => set('total_tokens', Number(e.target.value))}
           />
+        </div>
+        <div className='flex flex-col gap-1.5'>
+          <Label htmlFor='tp-metering'>{t('Metering mode')}</Label>
+          <NativeSelect
+            id='tp-metering'
+            className='w-full'
+            value={form.metering_mode}
+            onChange={(e) =>
+              set('metering_mode', e.target.value as TokenPlanMeteringMode)
+            }
+          >
+            <NativeSelectOption value='weighted'>
+              {t('Weighted by model ratio')}
+            </NativeSelectOption>
+            <NativeSelectOption value='raw'>
+              {t('Raw token count')}
+            </NativeSelectOption>
+          </NativeSelect>
         </div>
 
         <div className='flex flex-col gap-1.5'>
@@ -309,33 +343,6 @@ export function PlanFormDialog({
             value={form.window2_tokens}
             onChange={(e) => set('window2_tokens', Number(e.target.value))}
           />
-        </div>
-
-        <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='tp-metering'>{t('Metering mode')}</Label>
-          <NativeSelect
-            id='tp-metering'
-            className='w-full'
-            value={form.metering_mode}
-            onChange={(e) =>
-              set('metering_mode', e.target.value as TokenPlanMeteringMode)
-            }
-          >
-            <NativeSelectOption value='weighted'>
-              {t('Weighted by model ratio')}
-            </NativeSelectOption>
-            <NativeSelectOption value='raw'>
-              {t('Raw token count')}
-            </NativeSelectOption>
-          </NativeSelect>
-        </div>
-        <div className='flex items-end gap-2 pb-1'>
-          <Switch
-            id='tp-enabled'
-            checked={form.enabled}
-            onCheckedChange={(checked) => set('enabled', checked)}
-          />
-          <Label htmlFor='tp-enabled'>{t('Enabled')}</Label>
         </div>
 
         <div className='flex flex-col gap-2 sm:col-span-2'>
