@@ -803,6 +803,43 @@ func SyncTokenPlanThrottle(planId int) (int64, error) {
 	return result.RowsAffected, result.Error
 }
 
+// CountThrottleDriftByPlan 返回「节流参数与套餐模板不一致的生效订阅数」，按套餐 id 聚合。
+//
+// 节流参数是快照语义：管理员改模板后，已订阅用户要显式调用 SyncTokenPlanThrottle
+// 才会生效。这个计数用于在管理页标出「还有 N 个订阅没同步」。
+// 返回的 map 里没有出现的套餐，表示其订阅全部与模板一致（或没有订阅）。
+func CountThrottleDriftByPlan() (map[int]int64, error) {
+	type driftRow struct {
+		PlanId int   `gorm:"column:plan_id"`
+		Total  int64 `gorm:"column:total"`
+	}
+	rows := make([]driftRow, 0)
+
+	err := DB.Table("user_token_plans AS p").
+		Select("p.plan_id AS plan_id, COUNT(*) AS total").
+		Joins("JOIN token_plans AS t ON t.id = p.plan_id").
+		Where("p.status = ? AND p.end_time > ?", TokenPlanStatusActive, common.GetTimestamp()).
+		Where("(p.first_byte_delay_enabled <> t.first_byte_delay_enabled" +
+			" OR p.first_byte_delay_prompt_threshold <> t.first_byte_delay_prompt_threshold" +
+			" OR p.first_byte_delay_probability <> t.first_byte_delay_probability" +
+			" OR p.first_byte_delay_min_ms <> t.first_byte_delay_min_ms" +
+			" OR p.first_byte_delay_max_ms <> t.first_byte_delay_max_ms" +
+			" OR p.concurrency_limit <> t.concurrency_limit" +
+			" OR p.rate_limit_count <> t.rate_limit_count" +
+			" OR p.rate_limit_window_seconds <> t.rate_limit_window_seconds)").
+		Group("p.plan_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	out := make(map[int]int64, len(rows))
+	for _, row := range rows {
+		out[row.PlanId] = row.Total
+	}
+	return out, nil
+}
+
 // TokenPlanSubscriberView 是管理端「已订阅用户」列表的一行。
 type TokenPlanSubscriberView struct {
 	UserId       int    `json:"user_id" gorm:"column:user_id"`

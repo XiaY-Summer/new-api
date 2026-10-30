@@ -154,6 +154,8 @@ export function TokenPlans() {
         })
       )
       setSyncing(null)
+      // 同步后「未同步」角标要消失，两个查询都得刷新。
+      refresh()
       queryClient.invalidateQueries({ queryKey: SUBSCRIBERS_QUERY_KEY })
     } catch (error) {
       handleServerError(error, t('Failed to sync throttling'))
@@ -262,6 +264,14 @@ export function TokenPlans() {
                                 .filter(Boolean)
                                 .join(' · ') || t('No throttling')}
                             </div>
+                            {plan.throttle_drift_subscribers > 0 ? (
+                              <Badge variant='warning' className='mt-1'>
+                                {t(
+                                  'Throttling not synced to {{count}} subscriber(s)',
+                                  { count: plan.throttle_drift_subscribers }
+                                )}
+                              </Badge>
+                            ) : null}
                           </TableCell>
                           <TableCell className='text-right tabular-nums'>
                             ¥{plan.price_amount}

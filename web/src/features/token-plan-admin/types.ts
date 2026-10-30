@@ -49,6 +49,8 @@ export interface TokenPlanAdminRecord {
   concurrency_limit: number
   rate_limit_count: number
   rate_limit_window_seconds: number
+  // 只读：节流参数与模板不一致的生效订阅数，由后端列表接口计算。
+  throttle_drift_subscribers: number
   enabled: boolean
 }
 
@@ -95,6 +97,7 @@ export function emptyTokenPlan(): TokenPlanAdminRecord {
     concurrency_limit: 0,
     rate_limit_count: 0,
     rate_limit_window_seconds: 60,
+    throttle_drift_subscribers: 0,
     enabled: true,
   }
 }

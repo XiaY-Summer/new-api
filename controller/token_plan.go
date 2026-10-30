@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -46,6 +47,10 @@ type TokenPlanView struct {
 	ConcurrencyLimit              int   `json:"concurrency_limit"`
 	RateLimitCount                int   `json:"rate_limit_count"`
 	RateLimitWindowSeconds        int64 `json:"rate_limit_window_seconds"`
+
+	// ThrottleDriftSubscribers 是节流参数与模板不一致的生效订阅数，只读：
+	// 创建/更新时由 toModel 忽略，仅在管理端列表里用来提示「还没同步」。
+	ThrottleDriftSubscribers int64 `json:"throttle_drift_subscribers"`
 
 	Enabled   bool  `json:"enabled"`
 	CreatedAt int64 `json:"created_at"`
@@ -253,7 +258,19 @@ func AdminListTokenPlans(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, newTokenPlanViews(plans))
+	views := newTokenPlanViews(plans)
+
+	// 附带「节流未同步的订阅数」：改模板不会影响已购用户，管理页需要提示这一点。
+	// 统计失败不影响列表本身，只是少一个提示。
+	if drift, driftErr := model.CountThrottleDriftByPlan(); driftErr != nil {
+		logger.LogError(c.Request.Context(), common.LogText("failed to count token plan throttle drift: %s", driftErr.Error()))
+	} else {
+		for i := range views {
+			views[i].ThrottleDriftSubscribers = drift[views[i].Id]
+		}
+	}
+
+	common.ApiSuccess(c, views)
 }
 
 type AdminUpsertTokenPlanRequest struct {

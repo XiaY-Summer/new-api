@@ -7461,6 +7461,7 @@
     "Failed to sync throttling": "Failed to sync throttling",
     "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.": "This pushes the current throttling settings to every active subscription of this plan. Quota, windows and expiry are untouched.",
     "= {{count}} tokens": "= {{count}} tokens",
-    "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K)."
+    "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).",
+    "Throttling not synced to {{count}} subscriber(s)": "Throttling not synced to {{count}} subscriber(s)"
   }
 }
