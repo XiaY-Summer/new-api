@@ -154,15 +154,6 @@ func ollamaStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	var created = time.Now().Unix()
 	var toolCallIndex int
 
-	// TOKEN PLAN 首字延迟。Ollama 走自建流循环，不经过 helper.StreamScannerHandler，
-	// 所以需要在写入第一个字节（下面的起始空帧）之前单独注入一次。少这一处，
-	// 套餐的首字延迟对 Ollama 渠道完全无效。
-	if delay := info.TakeFirstByteDelay(); delay > 0 {
-		if !relaycommon.WaitFirstByteDelay(c.Request.Context(), nil, delay) {
-			return usage, nil
-		}
-	}
-
 	start := helper.GenerateStartEmptyResponse(responseId, created, model, nil)
 	if data, err := common.Marshal(start); err == nil {
 		_ = helper.StringData(c, string(data))

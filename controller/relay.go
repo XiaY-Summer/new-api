@@ -203,6 +203,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
+		// TOKEN PLAN 首字延迟：在转发上游之前等待，等待期间上游完全不被占用。
+		// 闸门用 sync.Once，重试再次走到这里时 Take() 返回 0，不会重复延迟。
+		// 客户端中途断开时直接放弃本次转发，既不消耗上游也不触发重试。
+		if delay := relayInfo.TakeFirstByteDelay(); delay > 0 {
+			if !relaycommon.WaitFirstByteDelay(c.Request.Context(), delay) {
+				newAPIError = types.NewError(c.Request.Context().Err(), types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+				return
+			}
+		}
+
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
 			newAPIError = relay.WssHelper(c, relayInfo)

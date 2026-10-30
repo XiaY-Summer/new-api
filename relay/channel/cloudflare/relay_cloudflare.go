@@ -35,14 +35,6 @@ func cfStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Res
 	scanner.Split(bufio.ScanLines)
 
 	helper.SetEventStreamHeaders(c)
-
-	// TOKEN PLAN 首字延迟：本渠道走自建流循环，不经过 helper.StreamScannerHandler，
-	// 需在写第一个字节之前单独注入一次（否则套餐的首字延迟对本渠道无效）。
-	if delay := info.TakeFirstByteDelay(); delay > 0 {
-		if !relaycommon.WaitFirstByteDelay(c.Request.Context(), nil, delay) {
-			return nil, nil
-		}
-	}
 	id := helper.GetResponseID(c)
 	var responseText string
 	isFirst := true

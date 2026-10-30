@@ -4,23 +4,16 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
-
-	"github.com/gin-gonic/gin"
 )
 
-// FirstByteDelayGate 保证「一次客户端请求最多延迟一次首字节」。
+// FirstByteDelayGate 保证「一次客户端请求最多延迟一次」。
 //
 // 决策发生在 relay.PrepareRequestBilling（prompt token 估算刚就绪，且在
-// controller.Relay 的重试循环之外），消费发生在真正向客户端写第一个字节的位置：
-//   - 流式：relay/helper.StreamScannerHandler 的首包入队前
-//   - 非流式：service.IOCopyBytesGracefully 写回前
+// controller.Relay 的重试循环之外），消费发生在 controller.Relay 里、
+// 真正转发给上游之前——等待期间上游完全不被占用，也不会因为不读响应体
+// 而产生 TCP 背压。
 //
-// 用 sync.Once 而不是 bool：重试路径可能重复进入写回点，但只应睡一次。
-// 若第一次 attempt 在写出任何字节前就失败，gate 未被 Take，第二次 attempt 会
-// 拿到同一个时长并延迟一次——客户端确实还没收到东西，这个行为是对的。
+// 用 sync.Once 而不是 bool：重试路径会再次走到消费点，但只应睡一次。
 type FirstByteDelayGate struct {
 	delay time.Duration
 	once  sync.Once
@@ -44,37 +37,17 @@ func (g *FirstByteDelayGate) Take() time.Duration {
 	return taken
 }
 
-// SetFirstByteDelayGate 把闸门放进 gin context，供拿不到 RelayInfo 的写回路径读取。
-func SetFirstByteDelayGate(c *gin.Context, g *FirstByteDelayGate) {
-	if c == nil || g == nil {
-		return
-	}
-	common.SetContextKey(c, constant.ContextKeyTokenPlanFirstByteDelay, g)
-}
-
-// TakeFirstByteDelayFromContext 从 gin context 取走闸门并消耗它。
-func TakeFirstByteDelayFromContext(c *gin.Context) time.Duration {
-	if c == nil {
-		return 0
-	}
-	g, ok := common.GetContextKeyType[*FirstByteDelayGate](c, constant.ContextKeyTokenPlanFirstByteDelay)
-	if !ok {
-		return 0
-	}
-	return g.Take()
-}
-
-// WaitFirstByteDelay 在 d 内等待。
+// WaitFirstByteDelay 在 d 内等待，客户端断开时立即返回 false。
 //
-// stop 为 nil 时该分支永久阻塞（非流式路径不需要停止信号）；流式路径必须传
-// stopChan，否则客户端断开后 scanner 协程会卡在 sleep 里，让 cleanup 的
-// wg.Wait() 永久阻塞。返回 false 表示被取消，调用方应立即返回。
-func WaitFirstByteDelay(ctx context.Context, stop <-chan bool, d time.Duration) bool {
+// 这里不接 stop 通道：调用点在转发上游之前，此时还没有流可以停止，
+// 唯一需要响应的取消信号就是请求本身的 context。
+func WaitFirstByteDelay(ctx context.Context, d time.Duration) bool {
 	if d <= 0 {
 		return true
 	}
 	if ctx == nil {
-		ctx = context.Background()
+		time.Sleep(d)
+		return true
 	}
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -82,8 +55,6 @@ func WaitFirstByteDelay(ctx context.Context, stop <-chan bool, d time.Duration) 
 	case <-timer.C:
 		return true
 	case <-ctx.Done():
-		return false
-	case <-stop:
 		return false
 	}
 }

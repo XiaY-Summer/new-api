@@ -28,9 +28,6 @@ const (
 	// ContextKeyTokenPlanThrottle 承载 *model.TokenPlanThrottle，由 TokenPlanGuard 写入，
 	// relay.PrepareRequestBilling 读出后决定本次请求的首字延迟。
 	ContextKeyTokenPlanThrottle ContextKey = "token_plan_throttle"
-	// ContextKeyTokenPlanFirstByteDelay 承载 *relaycommon.FirstByteDelayGate，
-	// 给拿不到 RelayInfo 的非流式写回路径（service.IOCopyBytesGracefully）使用。
-	ContextKeyTokenPlanFirstByteDelay ContextKey = "token_plan_first_byte_delay"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"

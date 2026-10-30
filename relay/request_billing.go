@@ -66,12 +66,10 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 
 		// 首字延迟在这里一次性掷骰子：prompt token 估算刚就绪，且本函数在
 		// controller.Relay 的重试循环之外，重试不会重新掷、也不会叠加延迟。
+		// 真正的等待发生在 controller.Relay 里、转发上游之前。
 		if throttle, ok := common.GetContextKeyType[*model.TokenPlanThrottle](c, constant.ContextKeyTokenPlanThrottle); ok && throttle != nil {
 			if delay := throttle.DecideFirstByteDelay(tokens, rand.Float64); delay > 0 {
-				gate := relaycommon.NewFirstByteDelayGate(delay)
-				info.FirstByteDelayGate = gate
-				// 非流式写回路径（service.IOCopyBytesGracefully）拿不到 info，靠 context 传。
-				relaycommon.SetFirstByteDelayGate(c, gate)
+				info.FirstByteDelayGate = relaycommon.NewFirstByteDelayGate(delay)
 			}
 		}
 		return nil
