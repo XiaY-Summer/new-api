@@ -220,6 +220,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenPlanAdminRoute.POST("/plans", controller.AdminCreateTokenPlan)
 			tokenPlanAdminRoute.PUT("/plans/:id", controller.AdminUpdateTokenPlan)
 			tokenPlanAdminRoute.DELETE("/plans/:id", controller.AdminDeleteTokenPlan)
+			tokenPlanAdminRoute.POST("/plans/:id/sync-throttle", controller.AdminSyncTokenPlanThrottle)
 			tokenPlanAdminRoute.GET("/group-models", controller.AdminGetTokenPlanGroupModels)
 			tokenPlanAdminRoute.GET("/subscribers", controller.AdminListTokenPlanSubscribers)
 			tokenPlanAdminRoute.POST("/reset-usage", controller.AdminResetTokenPlanUsage)

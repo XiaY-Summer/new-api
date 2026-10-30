@@ -36,6 +36,17 @@ type TokenPlanView struct {
 	ModelLimits  string `json:"model_limits"`
 	GroupLimits  string `json:"group_limits"`
 
+	// 节流配置。延迟用毫秒（填 300 比 0.3 秒直观），概率用整数 0-100，
+	// 频率窗口用秒（与 window*_seconds 命名一致，量级只有几十秒，不需要再换单位）。
+	FirstByteDelayEnabled         bool  `json:"first_byte_delay_enabled"`
+	FirstByteDelayPromptThreshold int   `json:"first_byte_delay_prompt_threshold"`
+	FirstByteDelayProbability     int   `json:"first_byte_delay_probability"`
+	FirstByteDelayMinMs           int   `json:"first_byte_delay_min_ms"`
+	FirstByteDelayMaxMs           int   `json:"first_byte_delay_max_ms"`
+	ConcurrencyLimit              int   `json:"concurrency_limit"`
+	RateLimitCount                int   `json:"rate_limit_count"`
+	RateLimitWindowSeconds        int64 `json:"rate_limit_window_seconds"`
+
 	Enabled   bool  `json:"enabled"`
 	CreatedAt int64 `json:"created_at"`
 	UpdatedAt int64 `json:"updated_at"`
@@ -57,9 +68,19 @@ func newTokenPlanView(p *model.TokenPlan) TokenPlanView {
 		MeteringMode:   p.MeteringMode,
 		ModelLimits:    p.ModelLimits,
 		GroupLimits:    p.GroupLimits,
-		Enabled:        p.Enabled,
-		CreatedAt:      p.CreatedAt,
-		UpdatedAt:      p.UpdatedAt,
+
+		FirstByteDelayEnabled:         p.FirstByteDelayEnabled,
+		FirstByteDelayPromptThreshold: p.FirstByteDelayPromptThreshold,
+		FirstByteDelayProbability:     p.FirstByteDelayProbability,
+		FirstByteDelayMinMs:           p.FirstByteDelayMinMs,
+		FirstByteDelayMaxMs:           p.FirstByteDelayMaxMs,
+		ConcurrencyLimit:              p.ConcurrencyLimit,
+		RateLimitCount:                p.RateLimitCount,
+		RateLimitWindowSeconds:        p.RateLimitWindowSeconds,
+
+		Enabled:   p.Enabled,
+		CreatedAt: p.CreatedAt,
+		UpdatedAt: p.UpdatedAt,
 	}
 }
 
@@ -89,7 +110,17 @@ func (v TokenPlanView) toModel() model.TokenPlan {
 		MeteringMode:   v.MeteringMode,
 		ModelLimits:    v.ModelLimits,
 		GroupLimits:    v.GroupLimits,
-		Enabled:        v.Enabled,
+
+		FirstByteDelayEnabled:         v.FirstByteDelayEnabled,
+		FirstByteDelayPromptThreshold: v.FirstByteDelayPromptThreshold,
+		FirstByteDelayProbability:     v.FirstByteDelayProbability,
+		FirstByteDelayMinMs:           v.FirstByteDelayMinMs,
+		FirstByteDelayMaxMs:           v.FirstByteDelayMaxMs,
+		ConcurrencyLimit:              v.ConcurrencyLimit,
+		RateLimitCount:                v.RateLimitCount,
+		RateLimitWindowSeconds:        v.RateLimitWindowSeconds,
+
+		Enabled: v.Enabled,
 	}
 }
 
@@ -254,10 +285,47 @@ func validateTokenPlan(plan *model.TokenPlan) string {
 	return ""
 }
 
+// validateTokenPlanThrottle 在归一化之前校验节流参数，把明显填错的值挡下来，
+// 而不是悄悄夹到合法范围——管理员以为改成了 150%，实际存成 100% 更难排查。
+func validateTokenPlanThrottle(v TokenPlanView) string {
+	if v.FirstByteDelayProbability < 0 || v.FirstByteDelayProbability > 100 {
+		return "Trigger probability must be between 0 and 100"
+	}
+	if v.FirstByteDelayPromptThreshold < 0 {
+		return "Prompt token threshold cannot be negative"
+	}
+	if v.FirstByteDelayMinMs < 0 || v.FirstByteDelayMaxMs < 0 {
+		return "Delay must not be negative"
+	}
+	if v.FirstByteDelayMaxMs < v.FirstByteDelayMinMs {
+		return "Delay max must be greater than or equal to delay min"
+	}
+	if v.FirstByteDelayEnabled && v.FirstByteDelayMaxMs <= 0 {
+		return "Delay max must be greater than 0 when the delay is enabled"
+	}
+	if v.ConcurrencyLimit < 0 {
+		return "Concurrency limit cannot be negative"
+	}
+	if v.RateLimitCount < 0 {
+		return "Rate limit count cannot be negative"
+	}
+	if v.RateLimitWindowSeconds < 0 {
+		return "Rate limit window cannot be negative"
+	}
+	if v.RateLimitCount > 0 && v.RateLimitWindowSeconds <= 0 {
+		return "Rate limit window must be greater than 0 when a request limit is set"
+	}
+	return ""
+}
+
 func AdminCreateTokenPlan(c *gin.Context) {
 	var req AdminUpsertTokenPlanRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if msg := validateTokenPlanThrottle(req.Plan); msg != "" {
+		common.ApiErrorT(c, msg)
 		return
 	}
 	plan := req.Plan.toModel()
@@ -290,6 +358,10 @@ func AdminUpdateTokenPlan(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
+	if msg := validateTokenPlanThrottle(req.Plan); msg != "" {
+		common.ApiErrorT(c, msg)
+		return
+	}
 	plan := req.Plan.toModel()
 	plan.NormalizeDefaults()
 	if msg := validateTokenPlan(&plan); msg != "" {
@@ -311,8 +383,18 @@ func AdminUpdateTokenPlan(c *gin.Context) {
 		"metering_mode":   plan.MeteringMode,
 		"model_limits":    plan.ModelLimits,
 		"group_limits":    plan.GroupLimits,
-		"enabled":         plan.Enabled,
-		"updated_at":      common.GetTimestamp(),
+
+		"first_byte_delay_enabled":          plan.FirstByteDelayEnabled,
+		"first_byte_delay_prompt_threshold": plan.FirstByteDelayPromptThreshold,
+		"first_byte_delay_probability":      plan.FirstByteDelayProbability,
+		"first_byte_delay_min_ms":           plan.FirstByteDelayMinMs,
+		"first_byte_delay_max_ms":           plan.FirstByteDelayMaxMs,
+		"concurrency_limit":                 plan.ConcurrencyLimit,
+		"rate_limit_count":                  plan.RateLimitCount,
+		"rate_limit_window_seconds":         plan.RateLimitWindowSeconds,
+
+		"enabled":    plan.Enabled,
+		"updated_at": common.GetTimestamp(),
 	}
 	if err := model.DB.Model(&model.TokenPlan{}).Where("id = ?", existing.Id).Updates(updates).Error; err != nil {
 		common.ApiError(c, err)
@@ -337,6 +419,22 @@ func AdminDeleteTokenPlan(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, nil)
+}
+
+// AdminSyncTokenPlanThrottle 把套餐模板当前的节流参数推送到该套餐所有生效中的订阅。
+// 只动 8 个节流列，额度、窗口、锚点、已用量与到期时间一概不变。
+func AdminSyncTokenPlanThrottle(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if id <= 0 {
+		common.ApiErrorT(c, "Invalid ID")
+		return
+	}
+	affected, err := model.SyncTokenPlanThrottle(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"affected": affected})
 }
 
 // AdminGetTokenPlanGroupModels 返回「分组 -> 可用模型」的映射，供套餐表单按分组带入模型。

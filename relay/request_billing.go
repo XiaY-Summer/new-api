@@ -3,12 +3,14 @@ package relay
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -61,6 +63,17 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 	if tokenPlanId := common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId); tokenPlanId > 0 {
 		info.TokenPlanId = tokenPlanId
 		info.TokenPlanMetering = common.GetContextKeyString(c, constant.ContextKeyTokenPlanMetering)
+
+		// 首字延迟在这里一次性掷骰子：prompt token 估算刚就绪，且本函数在
+		// controller.Relay 的重试循环之外，重试不会重新掷、也不会叠加延迟。
+		if throttle, ok := common.GetContextKeyType[*model.TokenPlanThrottle](c, constant.ContextKeyTokenPlanThrottle); ok && throttle != nil {
+			if delay := throttle.DecideFirstByteDelay(tokens, rand.Float64); delay > 0 {
+				gate := relaycommon.NewFirstByteDelayGate(delay)
+				info.FirstByteDelayGate = gate
+				// 非流式写回路径（service.IOCopyBytesGracefully）拿不到 info，靠 context 传。
+				relaycommon.SetFirstByteDelayGate(c, gate)
+			}
+		}
 		return nil
 	}
 

@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -84,7 +85,53 @@ func TokenPlanGuard() gin.HandlerFunc {
 			}
 		}
 
+		throttle := sub.Throttle()
+
+		// 频率限制：无状态、最便宜，放在并发之前——被频率拒掉的请求不该占用并发槽位。
+		if allowed, retryAfter := tokenPlanRateAllow(c, sub, throttle); !allowed {
+			if retryAfter > 0 {
+				c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
+			}
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests,
+				i18n.T(c, i18n.MsgTokenPlanRateLimited, map[string]any{
+					"Window": formatWindowLabel(throttle.RateLimitWindowSeconds),
+					"Max":    throttle.RateLimitCount,
+				}),
+				types.ErrorCodeInsufficientUserQuota)
+			return
+		}
+
+		// 并发槽位必须在所有拒绝分支之后申请，否则一个注定被 403 的请求会白占槽位。
+		release := tokenPlanConcurrencyAcquire(sub, throttle.ConcurrencyLimit)
+		if release == nil {
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests,
+				i18n.T(c, i18n.MsgTokenPlanConcurrencyLimited, map[string]any{
+					"Max": throttle.ConcurrencyLimit,
+				}),
+				types.ErrorCodeInsufficientUserQuota)
+			return
+		}
+		// c.Next() 会一直阻塞到 handler 链跑完（流式即整条流结束）才返回，所以这里的
+		// defer 恰好等于「请求真正结束时释放」。handler panic 时栈展开同样经过本帧。
+		defer release()
+
 		common.SetContextKey(c, constant.ContextKeyTokenPlanMetering, sub.MeteringMode)
+		common.SetContextKey(c, constant.ContextKeyTokenPlanThrottle, &throttle)
+		c.Next()
+	}
+}
+
+// TokenPlanReject 拒绝 TOKEN PLAN 专用密钥访问不做 token 计量的端点（例如 /mj）。
+//
+// 这些端点走异步任务计价，不经过 PrepareRequestBilling 的 token 计量；如果只挂
+// TokenPlanGuard，就变成「拦额度但不记账」，等于给套餐 key 开了一条免费通道。
+func TokenPlanReject() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if common.GetContextKeyInt(c, constant.ContextKeyTokenPlanId) > 0 {
+			abortWithOpenAiMessage(c, http.StatusForbidden,
+				i18n.T(c, i18n.MsgTokenPlanEndpointUnsupported), types.ErrorCodeInsufficientUserQuota)
+			return
+		}
 		c.Next()
 	}
 }

@@ -206,6 +206,9 @@ func SetRelayRouter(router *gin.Engine) {
 	relayGeminiRouter.Use(middleware.RouteTag("relay"))
 	relayGeminiRouter.Use(middleware.SystemPerformanceCheck())
 	relayGeminiRouter.Use(middleware.TokenAuth())
+	// TOKEN PLAN 闸门：不挂的话套餐 key 走 Gemini 原生路径会完全绕过额度、
+	// 分组与节流限制（历史缺口，随节流功能一并补上）。
+	relayGeminiRouter.Use(middleware.TokenPlanGuard())
 	relayGeminiRouter.Use(middleware.ModelRequestRateLimit())
 	relayGeminiRouter.Use(middleware.Distribute())
 	{
@@ -218,7 +221,9 @@ func SetRelayRouter(router *gin.Engine) {
 
 func registerMjRouterGroup(relayMjRouter *gin.RouterGroup) {
 	relayMjRouter.GET("/image/:id", relay.RelayMidjourneyImage)
-	relayMjRouter.Use(middleware.TokenAuth(), middleware.Distribute())
+	// MJ 是异步任务计价，不走 token 计量；套餐 key 在这里只拦不记账等于开免费通道，
+	// 所以直接拒绝，而不是挂 TokenPlanGuard。
+	relayMjRouter.Use(middleware.TokenAuth(), middleware.TokenPlanReject(), middleware.Distribute())
 	{
 		relayMjRouter.POST("/submit/action", controller.RelayMidjourney)
 		relayMjRouter.POST("/submit/shorten", controller.RelayMidjourney)

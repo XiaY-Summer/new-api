@@ -310,6 +310,16 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 
+				// TOKEN PLAN 首字延迟。必须在 SetFirstResponseTime 之后：那之后
+				// TTFT 指标已经记下上游首包时间，人为延迟不会污染 frt 与 perf_metrics。
+				// 此处不在 writeMutex 内，不会阻塞 ping 协程；stopChan 必须带上，
+				// 否则客户端断开后本协程会卡在 sleep 里，cleanup 的 wg.Wait() 永久阻塞。
+				if delay := info.TakeFirstByteDelay(); delay > 0 {
+					if !relaycommon.WaitFirstByteDelay(c.Request.Context(), stopChan, delay) {
+						return
+					}
+				}
+
 				select {
 				case dataChan <- data:
 				case <-ctx.Done():

@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +45,15 @@ func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	if c.Writer == nil {
 		return
+	}
+
+	// TOKEN PLAN 首字延迟：非流式没有「首字」概念，改为在写回前等待同样时长，
+	// 否则客户端只要用 stream=false 就能绕过套餐的减速策略。
+	// 必须放在设置 Content-Length / WriteHeader 之前——一旦写了响应头就无法再等。
+	if delay := relaycommon.TakeFirstByteDelayFromContext(c); delay > 0 {
+		if !relaycommon.WaitFirstByteDelay(c.Request.Context(), nil, delay) {
+			return // 客户端已断开，写回无意义
+		}
 	}
 
 	body := io.NopCloser(bytes.NewBuffer(data))

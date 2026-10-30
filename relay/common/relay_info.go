@@ -155,6 +155,9 @@ type RelayInfo struct {
 	// 改由 PostTextConsumeQuota 按 token 计量（TokenPlanMetering 决定是否按模型倍率加权）。
 	TokenPlanId       int
 	TokenPlanMetering string
+	// FirstByteDelayGate 非 nil 表示本次请求需要在写第一个字节前延迟一次。
+	// 由 PrepareRequestBilling 一次性掷骰子决定，重试不会重新掷、也不会重复延迟。
+	FirstByteDelayGate *FirstByteDelayGate
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
@@ -843,6 +846,14 @@ func (info *RelayInfo) GetEstimatePromptTokens() int {
 		return 0
 	}
 	return info.estimatePromptTokens
+}
+
+// TakeFirstByteDelay 取走首字延迟时长，只返回一次；未配置时返回 0。
+func (info *RelayInfo) TakeFirstByteDelay() time.Duration {
+	if info == nil {
+		return 0
+	}
+	return info.FirstByteDelayGate.Take()
 }
 
 // ---------------------------------------------------------------------------

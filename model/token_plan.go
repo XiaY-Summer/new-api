@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -63,6 +64,17 @@ type TokenPlan struct {
 	// 请求时校验 token 实际使用的分组是否在此列表内。
 	GroupLimits string `json:"group_limits" gorm:"type:text"`
 
+	// 节流配置，见 TokenPlanThrottle。布尔字段必须带 default:false，
+	// 否则 GORM 创建时跳过零值会导致列默认值不同步。
+	FirstByteDelayEnabled         bool  `json:"first_byte_delay_enabled" gorm:"not null;default:false"`
+	FirstByteDelayPromptThreshold int   `json:"first_byte_delay_prompt_threshold" gorm:"type:int;not null;default:0"`
+	FirstByteDelayProbability     int   `json:"first_byte_delay_probability" gorm:"type:int;not null;default:0"`
+	FirstByteDelayMinMs           int   `json:"first_byte_delay_min_ms" gorm:"type:int;not null;default:0"`
+	FirstByteDelayMaxMs           int   `json:"first_byte_delay_max_ms" gorm:"type:int;not null;default:0"`
+	ConcurrencyLimit              int   `json:"concurrency_limit" gorm:"type:int;not null;default:0"`
+	RateLimitCount                int   `json:"rate_limit_count" gorm:"type:int;not null;default:0"`
+	RateLimitWindowSeconds        int64 `json:"rate_limit_window_seconds" gorm:"type:bigint;not null;default:0"`
+
 	// Enabled 默认 false：GORM 创建时会忽略零值字段，只有列默认值同为 false 才能正确落库。
 	Enabled   bool  `json:"enabled" gorm:"not null;default:false"`
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
@@ -97,6 +109,15 @@ func (p *TokenPlan) NormalizeDefaults() {
 	if p.Window2Seconds <= 0 {
 		p.Window2Seconds = DefaultTokenPlanWindow2Seconds
 	}
+	t := p.Throttle().Normalize()
+	p.FirstByteDelayEnabled = t.FirstByteDelayEnabled
+	p.FirstByteDelayPromptThreshold = t.FirstByteDelayPromptThreshold
+	p.FirstByteDelayProbability = t.FirstByteDelayProbability
+	p.FirstByteDelayMinMs = t.FirstByteDelayMinMs
+	p.FirstByteDelayMaxMs = t.FirstByteDelayMaxMs
+	p.ConcurrencyLimit = t.ConcurrencyLimit
+	p.RateLimitCount = t.RateLimitCount
+	p.RateLimitWindowSeconds = t.RateLimitWindowSeconds
 }
 
 // ModelLimitList 把逗号分隔的模型限制拆成切片，空值返回 nil（表示不限）。
@@ -126,6 +147,150 @@ func SplitModelLimits(raw string) []string {
 	return out
 }
 
+// TokenPlanThrottle 是套餐的节流参数：首字延迟、并发上限、频率上限。
+// 单独抽出来是为了让判定逻辑成为纯函数，便于单测，也便于在中间件与 relay 之间传递。
+type TokenPlanThrottle struct {
+	FirstByteDelayEnabled         bool
+	FirstByteDelayPromptThreshold int
+	FirstByteDelayProbability     int
+	FirstByteDelayMinMs           int
+	FirstByteDelayMaxMs           int
+	ConcurrencyLimit              int
+	RateLimitCount                int
+	RateLimitWindowSeconds        int64
+}
+
+// Throttle 从套餐模板提取节流参数。
+func (p *TokenPlan) Throttle() TokenPlanThrottle {
+	if p == nil {
+		return TokenPlanThrottle{}
+	}
+	return TokenPlanThrottle{
+		FirstByteDelayEnabled:         p.FirstByteDelayEnabled,
+		FirstByteDelayPromptThreshold: p.FirstByteDelayPromptThreshold,
+		FirstByteDelayProbability:     p.FirstByteDelayProbability,
+		FirstByteDelayMinMs:           p.FirstByteDelayMinMs,
+		FirstByteDelayMaxMs:           p.FirstByteDelayMaxMs,
+		ConcurrencyLimit:              p.ConcurrencyLimit,
+		RateLimitCount:                p.RateLimitCount,
+		RateLimitWindowSeconds:        p.RateLimitWindowSeconds,
+	}
+}
+
+// throttleUpdates 返回节流列的更新映射。GORM 的 struct 更新会丢弃零值字段，
+// 因此「续费刷新」与「同步到订阅」都必须走显式 map，否则把开关关掉、把上限改回 0 会静默失效。
+func (p *TokenPlan) throttleUpdates() map[string]any {
+	return map[string]any{
+		"first_byte_delay_enabled":          p.FirstByteDelayEnabled,
+		"first_byte_delay_prompt_threshold": p.FirstByteDelayPromptThreshold,
+		"first_byte_delay_probability":      p.FirstByteDelayProbability,
+		"first_byte_delay_min_ms":           p.FirstByteDelayMinMs,
+		"first_byte_delay_max_ms":           p.FirstByteDelayMaxMs,
+		"concurrency_limit":                 p.ConcurrencyLimit,
+		"rate_limit_count":                  p.RateLimitCount,
+		"rate_limit_window_seconds":         p.RateLimitWindowSeconds,
+	}
+}
+
+// Throttle 从用户套餐快照提取节流参数。
+func (p *UserTokenPlan) Throttle() TokenPlanThrottle {
+	if p == nil {
+		return TokenPlanThrottle{}
+	}
+	return TokenPlanThrottle{
+		FirstByteDelayEnabled:         p.FirstByteDelayEnabled,
+		FirstByteDelayPromptThreshold: p.FirstByteDelayPromptThreshold,
+		FirstByteDelayProbability:     p.FirstByteDelayProbability,
+		FirstByteDelayMinMs:           p.FirstByteDelayMinMs,
+		FirstByteDelayMaxMs:           p.FirstByteDelayMaxMs,
+		ConcurrencyLimit:              p.ConcurrencyLimit,
+		RateLimitCount:                p.RateLimitCount,
+		RateLimitWindowSeconds:        p.RateLimitWindowSeconds,
+	}
+}
+
+// applyThrottle 把模板的节流参数写进快照。新建记录与续费刷新共用，避免两处漏字段。
+func (p *UserTokenPlan) applyThrottle(plan *TokenPlan) {
+	t := plan.Throttle()
+	p.FirstByteDelayEnabled = t.FirstByteDelayEnabled
+	p.FirstByteDelayPromptThreshold = t.FirstByteDelayPromptThreshold
+	p.FirstByteDelayProbability = t.FirstByteDelayProbability
+	p.FirstByteDelayMinMs = t.FirstByteDelayMinMs
+	p.FirstByteDelayMaxMs = t.FirstByteDelayMaxMs
+	p.ConcurrencyLimit = t.ConcurrencyLimit
+	p.RateLimitCount = t.RateLimitCount
+	p.RateLimitWindowSeconds = t.RateLimitWindowSeconds
+}
+
+// Normalize 收敛非法输入，保证后续判定不会因为脏数据产生怪异行为。
+func (t TokenPlanThrottle) Normalize() TokenPlanThrottle {
+	if t.FirstByteDelayPromptThreshold < 0 {
+		t.FirstByteDelayPromptThreshold = 0
+	}
+	if t.FirstByteDelayProbability < 0 {
+		t.FirstByteDelayProbability = 0
+	}
+	if t.FirstByteDelayProbability > 100 {
+		t.FirstByteDelayProbability = 100
+	}
+	if t.FirstByteDelayMinMs < 0 {
+		t.FirstByteDelayMinMs = 0
+	}
+	if t.FirstByteDelayMaxMs < 0 {
+		t.FirstByteDelayMaxMs = 0
+	}
+	if t.FirstByteDelayMaxMs < t.FirstByteDelayMinMs {
+		t.FirstByteDelayMaxMs = t.FirstByteDelayMinMs
+	}
+	if t.ConcurrencyLimit < 0 {
+		t.ConcurrencyLimit = 0
+	}
+	if t.RateLimitCount < 0 {
+		t.RateLimitCount = 0
+	}
+	if t.RateLimitCount > 0 && t.RateLimitWindowSeconds <= 0 {
+		t.RateLimitWindowSeconds = 60
+	}
+	if t.RateLimitWindowSeconds < 0 {
+		t.RateLimitWindowSeconds = 0
+	}
+	return t
+}
+
+// DecideFirstByteDelay 判定本次请求是否要延迟首字，以及延迟多久。
+//
+// 顺序：开关 -> 上下文阈值 -> 概率 -> 时长随机。roll 注入是为了让单测完全确定，
+// 生产传 rand.Float64 即可（全局无锁，不需要 seed）。
+func (t TokenPlanThrottle) DecideFirstByteDelay(promptTokens int, roll func() float64) time.Duration {
+	if !t.FirstByteDelayEnabled {
+		return 0
+	}
+	if t.FirstByteDelayPromptThreshold > 0 && promptTokens < t.FirstByteDelayPromptThreshold {
+		return 0
+	}
+	if t.FirstByteDelayProbability <= 0 || t.FirstByteDelayMaxMs <= 0 {
+		return 0
+	}
+	if t.FirstByteDelayProbability < 100 && roll()*100 >= float64(t.FirstByteDelayProbability) {
+		return 0
+	}
+	minMs, maxMs := t.FirstByteDelayMinMs, t.FirstByteDelayMaxMs
+	if minMs < 0 {
+		minMs = 0
+	}
+	if maxMs < minMs {
+		maxMs = minMs
+	}
+	ms := minMs
+	if span := maxMs - minMs; span > 0 {
+		ms += int(roll() * float64(span+1))
+		if ms > maxMs {
+			ms = maxMs
+		}
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
 // UserTokenPlan 是用户持有的套餐实例。下单时对套餐参数做快照，
 // 管理员后续修改模板不会影响已购用户。
 type UserTokenPlan struct {
@@ -143,6 +308,16 @@ type UserTokenPlan struct {
 	MeteringMode   string `json:"metering_mode" gorm:"type:varchar(16);default:'weighted'"`
 	ModelLimits    string `json:"model_limits" gorm:"type:text"`
 	GroupLimits    string `json:"group_limits" gorm:"type:text"`
+
+	// 节流配置的快照，含义同 TokenPlan 上同名字段。
+	FirstByteDelayEnabled         bool  `json:"first_byte_delay_enabled" gorm:"not null;default:false"`
+	FirstByteDelayPromptThreshold int   `json:"first_byte_delay_prompt_threshold" gorm:"type:int;not null;default:0"`
+	FirstByteDelayProbability     int   `json:"first_byte_delay_probability" gorm:"type:int;not null;default:0"`
+	FirstByteDelayMinMs           int   `json:"first_byte_delay_min_ms" gorm:"type:int;not null;default:0"`
+	FirstByteDelayMaxMs           int   `json:"first_byte_delay_max_ms" gorm:"type:int;not null;default:0"`
+	ConcurrencyLimit              int   `json:"concurrency_limit" gorm:"type:int;not null;default:0"`
+	RateLimitCount                int   `json:"rate_limit_count" gorm:"type:int;not null;default:0"`
+	RateLimitWindowSeconds        int64 `json:"rate_limit_window_seconds" gorm:"type:bigint;not null;default:0"`
 
 	// AnchorAt 首次使用时间，0 表示尚未开始计时。
 	AnchorAt int64 `json:"anchor_at" gorm:"type:bigint;not null;default:0"`
@@ -462,17 +637,24 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 			if !stillValid {
 				newEnd = now + extendSeconds
 			}
-			if err := tx.Model(&UserTokenPlan{}).Where("id = ?", current.Id).Updates(map[string]any{
+			updates := map[string]any{
 				"total_tokens": gorm.Expr("total_tokens + ?", plan.TotalTokens),
 				"end_time":     newEnd,
 				"status":       TokenPlanStatusActive,
 				"updated_time": now,
-			}).Error; err != nil {
+			}
+			// 续费视为按当前条款重新购买：节流参数一并刷新到最新模板值，
+			// 否则管理员收紧限制后，老用户靠续费就能永久沿用旧参数。
+			for key, value := range plan.throttleUpdates() {
+				updates[key] = value
+			}
+			if err := tx.Model(&UserTokenPlan{}).Where("id = ?", current.Id).Updates(updates).Error; err != nil {
 				return err
 			}
 			current.TotalTokens += plan.TotalTokens
 			current.EndTime = newEnd
 			current.Status = TokenPlanStatusActive
+			current.applyThrottle(plan)
 
 			token, tokenErr := bindTokenPlanKey(tx, userId, current.Id, now)
 			if tokenErr != nil {
@@ -515,6 +697,7 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 			EndTime:        now + extendSeconds,
 			Status:         TokenPlanStatusActive,
 		}
+		sub.applyThrottle(plan)
 		if err := tx.Create(sub).Error; err != nil {
 			return err
 		}
@@ -597,6 +780,26 @@ func ResetTokenPlanUsage(userId int) (int64, error) {
 		"anchor_at":     0,
 		"updated_time":  now,
 	})
+	return result.RowsAffected, result.Error
+}
+
+// SyncTokenPlanThrottle 把套餐模板的节流参数推送到该套餐所有生效中的订阅。
+//
+// 只更新 8 个节流列：绝不触碰额度、窗口时长、锚点、已用量与到期时间。
+// 参数是快照语义（下单时冻结），所以收紧限制后需要管理员显式调用本接口才会影响老用户。
+func SyncTokenPlanThrottle(planId int) (int64, error) {
+	plan, err := GetTokenPlanById(planId)
+	if err != nil {
+		return 0, err
+	}
+	plan.NormalizeDefaults()
+
+	updates := plan.throttleUpdates()
+	updates["updated_time"] = common.GetTimestamp()
+
+	result := DB.Model(&UserTokenPlan{}).
+		Where("plan_id = ? AND status = ? AND end_time > ?", planId, TokenPlanStatusActive, common.GetTimestamp()).
+		Updates(updates)
 	return result.RowsAffected, result.Error
 }
 
