@@ -7359,6 +7359,21 @@
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
-    "This plan has no available group for your account": "Ce forfait ne propose aucun groupe accessible à votre compte"
+    "This plan has no available group for your account": "Ce forfait ne propose aucun groupe accessible à votre compte",
+    "EPay only supports CNY plans": "EPay prend uniquement en charge les offres en CNY",
+    "EPay plan prices must use at most two decimal places": "Les prix EPay doivent avoir au plus deux décimales",
+    "TOKEN PLAN downgrades are not supported while the current plan is active": "Le passage à une offre TOKEN PLAN inférieure est indisponible tant que l’offre actuelle est active",
+    "TOKEN PLAN activates after payment is confirmed": "TOKEN PLAN sera activé après confirmation du paiement",
+    "Payment could not be confirmed. If charged, contact the administrator with your order number.": "Le paiement n’a pas pu être confirmé. En cas de débit, contactez l’administrateur avec le numéro de commande.",
+    "Payment is pending. Refresh this page after completing payment.": "Paiement en attente. Actualisez cette page après le paiement.",
+    "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.": "Paiement reçu. Votre TOKEN PLAN est en attente d’activation. Contactez l’administrateur en indiquant votre numéro de commande.",
+    "Paid orders awaiting activation": "Commandes payées en attente d’activation",
+    "Activation failure reason": "Motif de l’échec d’activation",
+    "Retry activation": "Réessayer l’activation",
+    "Failed to load payment issues": "Impossible de charger les paiements à traiter",
+    "No orders awaiting activation": "Aucune commande en attente d’activation",
+    "TOKEN PLAN activation could not be completed. Check the payment issue details.": "L’activation du TOKEN PLAN n’a pas pu aboutir. Consultez les détails du paiement à traiter.",
+    "Order number": "Numéro de commande",
+    "Payment time": "Date du paiement"
   }
 }

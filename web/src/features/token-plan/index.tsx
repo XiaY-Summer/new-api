@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearch } from '@tanstack/react-router'
 import { RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -24,20 +25,18 @@ import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { SectionPageLayout } from '@/components/layout'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
-import {
-  getTokenPlanPlans,
-  getTokenPlanSelf,
-  purchaseTokenPlan,
-  resetTokenPlanKey,
-} from './api'
+import { getTokenPlanPlans, getTokenPlanSelf, resetTokenPlanKey } from './api'
 import { AvailableModels } from './components/available-models'
 import { DedicatedKeyCard } from './components/dedicated-key-card'
+import { TokenPlanPaymentIssues } from './components/payment-issues'
 import { PlanCards } from './components/plan-cards'
+import { TokenPlanPurchaseDialog } from './components/purchase-dialog'
 import { QuotaWindows } from './components/quota-windows'
 import { formatUnixTime } from './lib/format'
 
@@ -45,9 +44,11 @@ const QUERY_KEY = ['token-plan']
 
 export function TokenPlan() {
   const { t } = useTranslation()
+  const { pay } = useSearch({ from: '/_authenticated/token-plan/' })
   const queryClient = useQueryClient()
   // 已订阅时套餐列表收进弹窗，避免把在售套餐和当前套餐混在一起。
   const [plansOpen, setPlansOpen] = useState(false)
+  const [purchasePlanId, setPurchasePlanId] = useState<number | null>(null)
 
   // 套餐与订阅状态都可能被管理员在后台改动（删除套餐会直接取消订阅），
   // 所以不吃全局的 staleTime 缓存：每次进入页面都重新拉，切回标签页也重新拉。
@@ -79,23 +80,6 @@ export function TokenPlan() {
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: QUERY_KEY })
-
-  const purchaseMutation = useMutation({
-    mutationFn: async (planId: number) => {
-      const result = await purchaseTokenPlan(planId)
-      if (!result.success) {
-        throw createServerError(result, t('Subscription failed'))
-      }
-      return result.data
-    },
-    onSuccess: () => {
-      toast.success(t('Subscribed successfully'))
-      // 购买后关闭弹窗，页面回到「已订阅」视图。
-      setPlansOpen(false)
-      invalidate()
-    },
-    onError: (error) => handleServerError(error, t('Subscription failed')),
-  })
 
   const resetMutation = useMutation({
     mutationFn: async () => {
@@ -140,10 +124,10 @@ export function TokenPlan() {
     <PlanCards
       plans={plansQuery.data ?? []}
       currentPlanId={self?.subscription?.plan_id}
-      purchasingId={
-        purchaseMutation.isPending ? purchaseMutation.variables : undefined
-      }
-      onPurchase={(planId) => purchaseMutation.mutate(planId)}
+      onPurchase={(planId) => {
+        setPlansOpen(false)
+        setPurchasePlanId(planId)
+      }}
     />
   )
 
@@ -177,6 +161,31 @@ export function TokenPlan() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='mx-auto flex w-full max-w-5xl flex-col gap-4 pb-6'>
+          {pay ? (
+            <Alert variant={pay === 'fail' ? 'destructive' : 'default'}>
+              <AlertDescription>
+                {pay === 'success'
+                  ? t('Subscription purchased successfully')
+                  : null}
+                {pay === 'fail'
+                  ? t(
+                      'Payment could not be confirmed. If charged, contact the administrator with your order number.'
+                    )
+                  : null}
+                {pay === 'pending'
+                  ? t(
+                      'Payment is pending. Refresh this page after completing payment.'
+                    )
+                  : null}
+                {pay === 'processing'
+                  ? t(
+                      'Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.'
+                    )
+                  : null}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <TokenPlanPaymentIssues />
           {hasPlan && self?.subscription ? (
             <div className='bg-muted/40 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 text-xs'>
               <div className='flex items-center gap-2'>
@@ -233,6 +242,14 @@ export function TokenPlan() {
         >
           {planCards}
         </Dialog>
+        <TokenPlanPurchaseDialog
+          plan={
+            plansQuery.data?.find((plan) => plan.id === purchasePlanId) ?? null
+          }
+          onOpenChange={(open) => {
+            if (!open) setPurchasePlanId(null)
+          }}
+        />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

@@ -17,9 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute } from '@tanstack/react-router'
+import { z } from 'zod'
 
 import { TokenPlan } from '@/features/token-plan'
 
 export const Route = createFileRoute('/_authenticated/token-plan/')({
+  validateSearch: z.object({
+    pay: z
+      .enum(['success', 'fail', 'pending', 'processing'])
+      .optional()
+      .catch(undefined),
+  }),
   component: TokenPlan,
 })

@@ -75,7 +75,7 @@ func setupTokenPlanRegressionDB(t *testing.T, dsn string, upgrade bool) {
 	})
 	require.NoError(t, model.InitDB())
 	defer func() { common.IsMasterNode = false }()
-	for _, table := range []any{&model.TokenPlanPreConsumeRecord{}, &model.Token{}, &model.UserTokenPlan{}, &model.TokenPlan{}, &model.User{}, &model.Log{}} {
+	for _, table := range []any{&model.TokenPlanOrder{}, &model.TopUp{}, &model.TokenPlanPreConsumeRecord{}, &model.Token{}, &model.UserTokenPlan{}, &model.TokenPlan{}, &model.User{}, &model.Log{}} {
 		require.NoError(t, model.DB.Migrator().DropTable(table))
 	}
 	var ordinaryId int
@@ -84,6 +84,11 @@ func setupTokenPlanRegressionDB(t *testing.T, dsn string, upgrade bool) {
 		legacy := &model.Token{UserId: 123, Key: "ordinary-key-survives-upgrade", Name: "ordinary", Status: common.TokenStatusEnabled, ExpiredTime: -1, RemainQuota: 789}
 		require.NoError(t, model.DB.Create(legacy).Error)
 		ordinaryId = legacy.Id
+		require.NoError(t, model.DB.AutoMigrate(&model.TokenPlanOrder{}))
+		require.NoError(t, model.DB.Create(&model.TokenPlanOrder{UserId: 123, PlanId: 456, TradeNo: "legacy-payment-order", Money: 59,
+			PaymentProvider: model.PaymentProviderEpay, PaymentMethod: "alipay", Status: common.TopUpStatusPending, PlanSnapshot: `{"id":456}`}).Error)
+		require.NoError(t, model.DB.Migrator().DropColumn(&model.TokenPlanOrder{}, "paid_time"))
+		require.NoError(t, model.DB.Migrator().DropColumn(&model.TokenPlanOrder{}, "fulfillment_error"))
 		require.NoError(t, model.DB.Migrator().DropColumn(&model.Token{}, "token_plan_id"))
 		require.NoError(t, model.DB.Migrator().DropColumn(&model.UserTokenPlan{}, "usage_version"))
 	}
@@ -96,6 +101,7 @@ func setupTokenPlanRegressionDB(t *testing.T, dsn string, upgrade bool) {
 	}
 	common.IsMasterNode = false
 	model.LOG_DB = model.DB
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.AuditLog{}))
 	db := model.DB
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
@@ -115,6 +121,13 @@ func setupTokenPlanRegressionDB(t *testing.T, dsn string, upgrade bool) {
 		assert.Equal(t, "ordinary-key-survives-upgrade", legacy.Key)
 		assert.Equal(t, 789, legacy.RemainQuota)
 		assert.Nil(t, legacy.TokenPlanId)
+		var order model.TokenPlanOrder
+		require.NoError(t, db.Where("trade_no = ?", "legacy-payment-order").First(&order).Error)
+		assert.Equal(t, 59.0, order.Money)
+		assert.Equal(t, `{"id":456}`, order.PlanSnapshot)
+		assert.Equal(t, common.TopUpStatusPending, order.Status)
+		assert.Zero(t, order.PaidTime)
+		assert.Empty(t, order.FulfillmentError)
 	}
 	require.NoError(t, i18n.Init())
 	gin.SetMode(gin.TestMode)
@@ -432,6 +445,7 @@ func runTokenPlanRegressionCases(t *testing.T) {
 		}
 	})
 	t.Run("purchase checks groups and preserves key reveal scope", func(t *testing.T) {
+		configureTokenPlanEpay(t)
 		user, sub, key := newTokenPlanRegressionSubscription(t)
 		for _, group := range []string{"", "not-an-accessible-group"} {
 			require.NoError(t, model.DB.Model(&model.TokenPlan{}).Where("id = ?", sub.PlanId).Update("group_limits", group).Error)
@@ -440,7 +454,7 @@ func runTokenPlanRegressionCases(t *testing.T) {
 			c.Set("id", user.Id)
 			c.Set("use_access_token", true)
 			c.Set("access_token_scopes", []string{"wallet:write"})
-			c.Request = httptest.NewRequest(http.MethodPost, "/purchase", strings.NewReader(fmt.Sprintf(`{"plan_id":%d}`, sub.PlanId)))
+			c.Request = httptest.NewRequest(http.MethodPost, "/purchase", strings.NewReader(fmt.Sprintf(`{"plan_id":%d,"payment_method":"alipay"}`, sub.PlanId)))
 			c.Request.Header.Set("Content-Type", "application/json")
 			controller.PurchaseTokenPlan(c)
 			assert.NotContains(t, w.Body.String(), key.Key)

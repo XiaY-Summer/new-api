@@ -7359,6 +7359,21 @@
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
-    "This plan has no available group for your account": "Gói này không có nhóm khả dụng cho tài khoản của bạn"
+    "This plan has no available group for your account": "Gói này không có nhóm khả dụng cho tài khoản của bạn",
+    "EPay only supports CNY plans": "EPay chỉ hỗ trợ gói CNY",
+    "EPay plan prices must use at most two decimal places": "Giá gói EPay chỉ được có tối đa hai chữ số thập phân",
+    "TOKEN PLAN downgrades are not supported while the current plan is active": "Không thể hạ cấp TOKEN PLAN khi gói hiện tại còn hiệu lực",
+    "TOKEN PLAN activates after payment is confirmed": "TOKEN PLAN được kích hoạt sau khi xác nhận thanh toán",
+    "Payment could not be confirmed. If charged, contact the administrator with your order number.": "Chưa xác nhận được thanh toán. Nếu đã bị trừ tiền, hãy liên hệ quản trị viên kèm mã đơn hàng.",
+    "Payment is pending. Refresh this page after completing payment.": "Đang chờ thanh toán. Hãy làm mới trang sau khi thanh toán xong.",
+    "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.": "Đã nhận thanh toán. TOKEN PLAN của bạn đang chờ kích hoạt. Vui lòng liên hệ quản trị viên và cung cấp mã đơn hàng.",
+    "Paid orders awaiting activation": "Đơn hàng đã thanh toán chờ kích hoạt",
+    "Activation failure reason": "Lý do kích hoạt thất bại",
+    "Retry activation": "Thử kích hoạt lại",
+    "Failed to load payment issues": "Không thể tải các khoản thanh toán cần xử lý",
+    "No orders awaiting activation": "Không có đơn hàng chờ kích hoạt",
+    "TOKEN PLAN activation could not be completed. Check the payment issue details.": "Không thể hoàn tất kích hoạt TOKEN PLAN. Hãy kiểm tra chi tiết khoản thanh toán cần xử lý.",
+    "Order number": "Mã đơn hàng",
+    "Payment time": "Thời gian thanh toán"
   }
 }

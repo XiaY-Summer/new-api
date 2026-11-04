@@ -7359,6 +7359,21 @@
     "Zhipu GLM": "智譜GLM",
     "Zhipu V4": "智譜 V4",
     "Zoom": "縮放",
-    "This plan has no available group for your account": "此套餐沒有您的帳號可用的分組"
+    "This plan has no available group for your account": "此套餐沒有您的帳號可用的分組",
+    "EPay only supports CNY plans": "易支付僅支援人民幣方案",
+    "EPay plan prices must use at most two decimal places": "易支付方案價格最多保留兩位小數",
+    "TOKEN PLAN downgrades are not supported while the current plan is active": "目前方案生效期間不支援降級 TOKEN PLAN",
+    "TOKEN PLAN activates after payment is confirmed": "付款確認後自動啟用 TOKEN PLAN",
+    "Payment could not be confirmed. If charged, contact the administrator with your order number.": "暫未確認付款。如已扣款，請憑訂單編號聯絡管理員。",
+    "Payment is pending. Refresh this page after completing payment.": "正在等待付款，付款完成後請重新整理此頁面。",
+    "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.": "已收到付款，TOKEN PLAN 正等待開通。請提供訂單號聯絡管理員。",
+    "Paid orders awaiting activation": "已付款待開通訂單",
+    "Activation failure reason": "開通失敗原因",
+    "Retry activation": "重試開通",
+    "Failed to load payment issues": "載入待處理付款失敗",
+    "No orders awaiting activation": "暫無待開通訂單",
+    "TOKEN PLAN activation could not be completed. Check the payment issue details.": "TOKEN PLAN 開通未完成，請查看待處理訂單中的失敗原因。",
+    "Order number": "訂單號",
+    "Payment time": "付款時間"
   }
 }

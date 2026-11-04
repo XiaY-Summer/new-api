@@ -7465,6 +7465,21 @@
     "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 表示所有请求都参与判定。请填纯数字，例如 500000，不支持 500K 这种写法。",
     "Throttling not synced to {{count}} subscriber(s)": "节流未同步到 {{count}} 个订阅",
     "Disabled plans stay visible to existing subscribers but cannot be purchased.": "下架后已订阅的用户仍可继续使用，但新用户无法购买。",
-    "This plan has no available group for your account": "此套餐没有您的账号可用的分组"
+    "This plan has no available group for your account": "此套餐没有您的账号可用的分组",
+    "EPay only supports CNY plans": "易支付仅支持人民币套餐",
+    "EPay plan prices must use at most two decimal places": "易支付套餐价格最多保留两位小数",
+    "TOKEN PLAN downgrades are not supported while the current plan is active": "当前套餐生效期间不支持降级 TOKEN PLAN",
+    "TOKEN PLAN activates after payment is confirmed": "支付确认后自动开通 TOKEN PLAN",
+    "Payment could not be confirmed. If charged, contact the administrator with your order number.": "暂未确认支付。如已扣款，请凭订单号联系管理员。",
+    "Payment is pending. Refresh this page after completing payment.": "正在等待支付，付款完成后请刷新此页面。",
+    "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.": "已收到付款，TOKEN PLAN 正等待开通。请提供订单号联系管理员。",
+    "Paid orders awaiting activation": "已付款待开通订单",
+    "Activation failure reason": "开通失败原因",
+    "Retry activation": "重试开通",
+    "Failed to load payment issues": "加载待处理付款失败",
+    "No orders awaiting activation": "暂无待开通订单",
+    "TOKEN PLAN activation could not be completed. Check the payment issue details.": "TOKEN PLAN 开通未完成，请查看待处理订单中的失败原因。",
+    "Order number": "订单号",
+    "Payment time": "付款时间"
   }
 }

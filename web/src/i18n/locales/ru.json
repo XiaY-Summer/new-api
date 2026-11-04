@@ -7359,6 +7359,21 @@
     "Zhipu GLM": "Zhipu GLM",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
-    "This plan has no available group for your account": "В этом плане нет групп, доступных вашей учётной записи"
+    "This plan has no available group for your account": "В этом плане нет групп, доступных вашей учётной записи",
+    "EPay only supports CNY plans": "EPay поддерживает только планы в CNY",
+    "EPay plan prices must use at most two decimal places": "Цена плана EPay должна содержать не более двух знаков после запятой",
+    "TOKEN PLAN downgrades are not supported while the current plan is active": "Понижение TOKEN PLAN недоступно, пока текущий план активен",
+    "TOKEN PLAN activates after payment is confirmed": "TOKEN PLAN активируется после подтверждения оплаты",
+    "Payment could not be confirmed. If charged, contact the administrator with your order number.": "Оплата не подтверждена. Если деньги списаны, сообщите администратору номер заказа.",
+    "Payment is pending. Refresh this page after completing payment.": "Ожидается оплата. Обновите страницу после завершения платежа.",
+    "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.": "Оплата получена. Ваш TOKEN PLAN ожидает активации. Сообщите администратору номер заказа.",
+    "Paid orders awaiting activation": "Оплаченные заказы, ожидающие активации",
+    "Activation failure reason": "Причина ошибки активации",
+    "Retry activation": "Повторить активацию",
+    "Failed to load payment issues": "Не удалось загрузить проблемные платежи",
+    "No orders awaiting activation": "Нет заказов, ожидающих активации",
+    "TOKEN PLAN activation could not be completed. Check the payment issue details.": "Не удалось активировать TOKEN PLAN. Проверьте сведения о проблемном платеже.",
+    "Order number": "Номер заказа",
+    "Payment time": "Время оплаты"
   }
 }

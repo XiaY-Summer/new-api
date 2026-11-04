@@ -35,6 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TokenPlanPaymentIssues } from '@/features/token-plan/components/payment-issues'
 import {
   formatNumber,
   formatUnixTime,
@@ -190,6 +191,7 @@ export function TokenPlans() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='mx-auto w-full max-w-6xl pb-6'>
+            <TokenPlanPaymentIssues admin />
             <p className='text-muted-foreground mb-3 text-xs'>
               {t(
                 'These plans drive the TOKEN PLAN page. Both windows are anchored to the first request and reset every N minutes.'

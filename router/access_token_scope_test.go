@@ -64,6 +64,10 @@ var accessTokenExemptRoutes = []string{
 	"POST /api/user/epay/notify",
 	"GET /api/subscription/epay/notify",
 	"POST /api/subscription/epay/notify",
+	"GET /api/token-plan/epay/notify",
+	"POST /api/token-plan/epay/notify",
+	"GET /api/token-plan/epay/return",
+	"POST /api/token-plan/epay/return",
 	"GET /api/subscription/epay/return",
 	"POST /api/subscription/epay/return",
 

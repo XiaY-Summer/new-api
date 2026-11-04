@@ -210,6 +210,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			tokenPlanRoute.GET("/plans", controller.GetTokenPlanPlans)
 			tokenPlanRoute.GET("/self", middleware.DisableCache(), controller.GetTokenPlanSelf)
+			tokenPlanRoute.GET("/payment-issues", middleware.DisableCache(), controller.ListTokenPlanPaymentIssues)
 			tokenPlanRoute.POST("/purchase", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.PurchaseTokenPlan)
 			tokenPlanRoute.POST("/key/reset", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.ResetTokenPlanKey)
 		}
@@ -217,6 +218,8 @@ func SetApiRouter(router *gin.Engine) {
 		tokenPlanAdminRoute.Use(middleware.AdminAuth())
 		{
 			tokenPlanAdminRoute.GET("/plans", controller.AdminListTokenPlans)
+			tokenPlanAdminRoute.GET("/payment-issues", middleware.DisableCache(), controller.AdminListTokenPlanPaymentIssues)
+			tokenPlanAdminRoute.POST("/orders/:trade_no/retry", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.AdminRetryTokenPlanOrder)
 			tokenPlanAdminRoute.POST("/plans", controller.AdminCreateTokenPlan)
 			tokenPlanAdminRoute.PUT("/plans/:id", controller.AdminUpdateTokenPlan)
 			tokenPlanAdminRoute.DELETE("/plans/:id", controller.AdminDeleteTokenPlan)
@@ -225,6 +228,12 @@ func SetApiRouter(router *gin.Engine) {
 			tokenPlanAdminRoute.GET("/subscribers", controller.AdminListTokenPlanSubscribers)
 			tokenPlanAdminRoute.POST("/reset-usage", controller.AdminResetTokenPlanUsage)
 		}
+
+		// TOKEN PLAN payment callbacks (no auth; signed by EPay).
+		apiRouter.POST("/token-plan/epay/notify", anonymousRequestBodyLimit, controller.TokenPlanEpayNotify)
+		apiRouter.GET("/token-plan/epay/notify", controller.TokenPlanEpayNotify)
+		apiRouter.POST("/token-plan/epay/return", anonymousRequestBodyLimit, controller.TokenPlanEpayReturn)
+		apiRouter.GET("/token-plan/epay/return", controller.TokenPlanEpayReturn)
 
 		// Subscription payment callbacks (no auth)
 		apiRouter.POST("/subscription/epay/notify", anonymousRequestBodyLimit, controller.SubscriptionEpayNotify)

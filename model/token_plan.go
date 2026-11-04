@@ -594,6 +594,11 @@ func RecordUsage(userId int, planId int, detail TokenPlanUsageDetail, meteringMo
 
 // ---- 购买与 key 管理 ----
 
+// Zero is an uncapped total quota, not the lowest tier.
+func tokenPlanQuotaDowngrade(current, target int64) bool {
+	return target > 0 && (current == 0 || current > target)
+}
+
 // GenerateTokenPlanKey 生成 token- 前缀的专用 key（含前缀，直接存库）。
 func GenerateTokenPlanKey() (string, error) {
 	raw, err := common.GenerateRandomCharsKey(48)
@@ -603,7 +608,8 @@ func GenerateTokenPlanKey() (string, error) {
 	return TokenPlanKeyPrefix + raw, nil
 }
 
-// PurchaseTokenPlan 是占位版的购买流程：不接支付，直接为当前用户开通套餐。
+// PurchaseTokenPlan grants a plan internally. Public purchases must complete a
+// verified payment order before calling purchaseTokenPlanTx.
 //
 // 三种情形：
 //   - 同套餐续费：在原记录上累加有效期与总额度，已用用量保留；
@@ -624,9 +630,6 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 		return nil, nil, errors.New("Invalid parameters")
 	}
 
-	now := common.GetTimestamp()
-	extendSeconds := int64(plan.DurationDays) * 86400
-
 	var result *UserTokenPlan
 	var resultToken *Token
 
@@ -640,114 +643,148 @@ func PurchaseTokenPlan(userId int, planId int) (*UserTokenPlan, *Token, error) {
 		if err := lockForUpdate(tx).Where("id = ? AND enabled = ?", plan.Id, true).First(plan).Error; err != nil {
 			return err
 		}
-		plan.NormalizeDefaults()
-		extendSeconds = int64(plan.DurationDays) * 86400
-		var current UserTokenPlan
-		currentErr := lockForUpdate(tx).
-			Where("user_id = ? AND status = ?", userId, TokenPlanStatusActive).
-			Order("id desc").
-			First(&current).Error
-		if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
-			return currentErr
-		}
-		hasCurrent := currentErr == nil
-		stillValid := hasCurrent && current.EndTime > now
-
-		// 同套餐续费：累加时长与总额度，而不是把到期时间重置成「现在 + 一个月」。
-		if hasCurrent && current.PlanId == plan.Id {
-			if current.TotalTokens > common.MaxWalletQuota-plan.TotalTokens {
-				return errors.New("Invalid parameters")
-			}
-			newEnd := current.EndTime + extendSeconds
-			// 已过期的套餐从当前时间重新起算，否则会累加出「续了费还是过期」的结果。
-			if !stillValid {
-				newEnd = now + extendSeconds
-			}
-			updates := map[string]any{
-				"total_tokens": gorm.Expr("total_tokens + ?", plan.TotalTokens),
-				"end_time":     newEnd,
-				"status":       TokenPlanStatusActive,
-				"updated_time": now,
-			}
-			// 续费视为按当前条款重新购买：节流参数一并刷新到最新模板值，
-			// 否则管理员收紧限制后，老用户靠续费就能永久沿用旧参数。
-			for key, value := range plan.throttleUpdates() {
-				updates[key] = value
-			}
-			if err := tx.Model(&UserTokenPlan{}).Where("id = ?", current.Id).Updates(updates).Error; err != nil {
-				return err
-			}
-			current.TotalTokens += plan.TotalTokens
-			current.EndTime = newEnd
-			current.Status = TokenPlanStatusActive
-			current.applyThrottle(plan)
-
-			token, tokenErr := bindTokenPlanKey(tx, userId, current.Id, now)
-			if tokenErr != nil {
-				return tokenErr
-			}
-			current.TokenId = token.Id
-
-			result = &current
-			resultToken = token
-			return nil
-		}
-
-		// 降级拦截：当前套餐仍在有效期内且额度更高时不允许被覆盖。
-		if stillValid {
-			var currentTemplate TokenPlan
-			if err := tx.Where("id = ?", current.PlanId).First(&currentTemplate).Error; err != nil {
-				return err
-			}
-			if currentTemplate.TotalTokens > plan.TotalTokens {
-				return errors.New("当前套餐额度高于目标套餐，暂不支持降级；如需降级请先联系管理员")
-			}
-		}
-
-		// 作废旧套餐
-		if hasCurrent {
-			if err := tx.Model(&UserTokenPlan{}).
-				Where("id = ?", current.Id).
-				Updates(map[string]any{"status": TokenPlanStatusCancelled, "updated_time": now}).Error; err != nil {
-				return err
-			}
-		}
-
-		sub := &UserTokenPlan{
-			UserId:         userId,
-			PlanId:         plan.Id,
-			PlanTitle:      plan.Title,
-			TotalTokens:    plan.TotalTokens,
-			Window1Seconds: plan.Window1Seconds,
-			Window1Tokens:  plan.Window1Tokens,
-			Window2Seconds: plan.Window2Seconds,
-			Window2Tokens:  plan.Window2Tokens,
-			MeteringMode:   plan.MeteringMode,
-			ModelLimits:    plan.ModelLimits,
-			GroupLimits:    plan.GroupLimits,
-			StartTime:      now,
-			EndTime:        now + extendSeconds,
-			Status:         TokenPlanStatusActive,
-		}
-		sub.applyThrottle(plan)
-		if err := tx.Create(sub).Error; err != nil {
-			return err
-		}
-
-		token, tokenErr := bindTokenPlanKey(tx, userId, sub.Id, now)
-		if tokenErr != nil {
-			return tokenErr
-		}
-		sub.TokenId = token.Id
-
-		result = sub
-		resultToken = token
-		return nil
+		var err error
+		result, resultToken, err = purchaseTokenPlanTx(tx, userId, plan)
+		return err
 	})
-	if err != nil {
+	return result, resultToken, err
+}
+
+// purchaseTokenPlanTx applies paid terms within the order's transaction. The
+// caller holds the user row lock, so independent orders cannot grant concurrently.
+func purchaseTokenPlanTx(tx *gorm.DB, userId int, plan *TokenPlan) (*UserTokenPlan, *Token, error) {
+	plan.NormalizeDefaults()
+	if plan.TotalTokens < 0 || plan.TotalTokens > common.MaxWalletQuota || plan.DurationDays > 36500 {
+		return nil, nil, errors.New("Invalid parameters")
+	}
+	now := common.GetTimestamp()
+	extendSeconds := int64(plan.DurationDays) * 86400
+	var current UserTokenPlan
+	currentErr := lockForUpdate(tx).
+		Where("user_id = ? AND status = ?", userId, TokenPlanStatusActive).
+		Order("id desc").
+		First(&current).Error
+	if currentErr != nil && !errors.Is(currentErr, gorm.ErrRecordNotFound) {
+		return nil, nil, currentErr
+	}
+	hasCurrent := currentErr == nil
+	stillValid := hasCurrent && current.EndTime > now
+
+	// 同套餐续费：累加时长与总额度，而不是把到期时间重置成「现在 + 一个月」。
+	if hasCurrent && current.PlanId == plan.Id {
+		if current.TotalTokens > 0 && plan.TotalTokens > 0 && current.TotalTokens > common.MaxWalletQuota-plan.TotalTokens {
+			return nil, nil, errors.New("Invalid parameters")
+		}
+		totalTokens := int64(0)
+		if current.TotalTokens > 0 && plan.TotalTokens > 0 {
+			totalTokens = current.TotalTokens + plan.TotalTokens
+		}
+		newEnd := current.EndTime + extendSeconds
+		// 已过期的套餐从当前时间重新起算，否则会累加出「续了费还是过期」的结果。
+		if !stillValid {
+			newEnd = now + extendSeconds
+		}
+		updates := map[string]any{
+			"total_tokens":    totalTokens,
+			"end_time":        newEnd,
+			"status":          TokenPlanStatusActive,
+			"updated_time":    now,
+			"plan_title":      plan.Title,
+			"window1_seconds": plan.Window1Seconds, "window1_tokens": plan.Window1Tokens,
+			"window2_seconds": plan.Window2Seconds, "window2_tokens": plan.Window2Tokens,
+			"model_limits": plan.ModelLimits, "group_limits": plan.GroupLimits,
+			"metering_mode": plan.MeteringMode,
+		}
+		// Carry the current window's usage into the new duration. Rebind only
+		// reservations charged to that window; older requests must not refund it.
+		w1, w2 := current.WindowViews(now)
+		for _, window := range []struct {
+			indexColumn, usedColumn      string
+			oldSeconds, newSeconds, used int64
+		}{
+			{"window1_index", "window1_used", current.Window1Seconds, plan.Window1Seconds, w1.UsedTokens},
+			{"window2_index", "window2_used", current.Window2Seconds, plan.Window2Seconds, w2.UsedTokens},
+		} {
+			if window.oldSeconds == window.newSeconds {
+				continue
+			}
+			oldIndex := WindowIndex(current.AnchorAt, now, window.oldSeconds)
+			newIndex := WindowIndex(current.AnchorAt, now, window.newSeconds)
+			if err := tx.Model(&TokenPlanPreConsumeRecord{}).
+				Where("user_token_plan_id = ? AND status = ? AND usage_version = ?", current.Id, "reserved", current.UsageVersion).
+				UpdateColumn(window.indexColumn, gorm.Expr("CASE WHEN "+window.indexColumn+" = ? THEN ? ELSE -1 END", oldIndex, newIndex)).Error; err != nil {
+				return nil, nil, err
+			}
+			updates[window.indexColumn], updates[window.usedColumn] = newIndex, window.used
+		}
+		// All terms come from the paid snapshot, even if the template changed again.
+		for key, value := range plan.throttleUpdates() {
+			updates[key] = value
+		}
+		if err := tx.Model(&UserTokenPlan{}).Where("id = ?", current.Id).Updates(updates).Error; err != nil {
+			return nil, nil, err
+		}
+		if err := tx.First(&current, current.Id).Error; err != nil {
+			return nil, nil, err
+		}
+
+		token, tokenErr := bindTokenPlanKey(tx, userId, current.Id, now)
+		if tokenErr != nil {
+			return nil, nil, tokenErr
+		}
+		current.TokenId = token.Id
+
+		return &current, token, nil
+	}
+
+	// 降级拦截：当前套餐仍在有效期内且额度更高时不允许被覆盖。
+	if stillValid {
+		var currentTemplate TokenPlan
+		if err := tx.Where("id = ?", current.PlanId).First(&currentTemplate).Error; err != nil {
+			return nil, nil, err
+		}
+		if tokenPlanQuotaDowngrade(currentTemplate.TotalTokens, plan.TotalTokens) {
+			return nil, nil, errors.New("当前套餐额度高于目标套餐，暂不支持降级；如需降级请先联系管理员")
+		}
+	}
+
+	// 作废旧套餐
+	if hasCurrent {
+		if err := tx.Model(&UserTokenPlan{}).
+			Where("id = ?", current.Id).
+			Updates(map[string]any{"status": TokenPlanStatusCancelled, "updated_time": now}).Error; err != nil {
+			return nil, nil, err
+		}
+	}
+
+	sub := &UserTokenPlan{
+		UserId:         userId,
+		PlanId:         plan.Id,
+		PlanTitle:      plan.Title,
+		TotalTokens:    plan.TotalTokens,
+		Window1Seconds: plan.Window1Seconds,
+		Window1Tokens:  plan.Window1Tokens,
+		Window2Seconds: plan.Window2Seconds,
+		Window2Tokens:  plan.Window2Tokens,
+		MeteringMode:   plan.MeteringMode,
+		ModelLimits:    plan.ModelLimits,
+		GroupLimits:    plan.GroupLimits,
+		StartTime:      now,
+		EndTime:        now + extendSeconds,
+		Status:         TokenPlanStatusActive,
+	}
+	sub.applyThrottle(plan)
+	if err := tx.Create(sub).Error; err != nil {
 		return nil, nil, err
 	}
-	return result, resultToken, nil
+
+	token, tokenErr := bindTokenPlanKey(tx, userId, sub.Id, now)
+	if tokenErr != nil {
+		return nil, nil, tokenErr
+	}
+	sub.TokenId = token.Id
+
+	return sub, token, nil
 }
 
 // bindTokenPlanKey 复用该用户已有的专用 key（没有则新建），并把它绑定到指定套餐记录。

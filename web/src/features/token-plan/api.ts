@@ -18,12 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type {
-  ApiResponse,
-  TokenPlan,
-  TokenPlanPurchaseResult,
-  TokenPlanSelf,
-} from './types'
+import type { ApiResponse, TokenPlan, TokenPlanSelf } from './types'
 
 export async function getTokenPlanPlans(): Promise<ApiResponse<TokenPlan[]>> {
   const res = await api.get('/api/token-plan/plans')
@@ -36,9 +31,13 @@ export async function getTokenPlanSelf(): Promise<ApiResponse<TokenPlanSelf>> {
 }
 
 export async function purchaseTokenPlan(
-  planId: number
-): Promise<ApiResponse<TokenPlanPurchaseResult>> {
-  const res = await api.post('/api/token-plan/purchase', { plan_id: planId })
+  planId: number,
+  paymentMethod: string
+): Promise<ApiResponse<Record<string, string>> & { url?: string }> {
+  const res = await api.post('/api/token-plan/purchase', {
+    plan_id: planId,
+    payment_method: paymentMethod,
+  })
   return res.data
 }
 

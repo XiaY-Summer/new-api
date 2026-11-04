@@ -93,8 +93,3 @@ export interface TokenPlanSelf {
   models?: string[]
   unrestricted?: boolean
 }
-
-export interface TokenPlanPurchaseResult {
-  subscription: TokenPlanSubscription
-  key: string
-}

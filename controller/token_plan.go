@@ -1,14 +1,19 @@
 package controller
 
 import (
+	"fmt"
+	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/Calcium-Ion/go-epay/epay"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
@@ -218,15 +223,31 @@ func GetTokenPlanSelf(c *gin.Context) {
 }
 
 type TokenPlanPurchaseRequest struct {
-	PlanId int `json:"plan_id"`
+	PlanId        int    `json:"plan_id"`
+	PaymentMethod string `json:"payment_method"`
 }
 
-// PurchaseTokenPlan 是占位版购买流程：不接支付，直接开通套餐。
+// PurchaseTokenPlan starts EPay checkout. Only verified callbacks grant a plan.
 func PurchaseTokenPlan(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
 	userId := c.GetInt("id")
 	var req TokenPlanPurchaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
 		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if req.PaymentMethod == "" || !operation_setting.ContainsPayMethod(req.PaymentMethod) ||
+		req.PaymentMethod == model.PaymentMethodStripe || req.PaymentMethod == model.PaymentMethodCreem ||
+		req.PaymentMethod == model.PaymentMethodWaffo || req.PaymentMethod == model.PaymentMethodWaffoPancake ||
+		req.PaymentMethod == model.PaymentMethodBalance {
+		common.ApiErrorT(c, "Payment method does not exist")
+		return
+	}
+	client := GetEpayClient()
+	if client == nil {
+		common.ApiErrorT(c, "Payment information has not been configured by administrator")
 		return
 	}
 	plan, err := model.GetTokenPlanById(req.PlanId)
@@ -253,18 +274,34 @@ func PurchaseTokenPlan(c *gin.Context) {
 			return
 		}
 	}
-	sub, token, err := model.PurchaseTokenPlan(userId, req.PlanId)
+	callbackAddress := strings.TrimRight(service.GetCallbackAddress(), "/")
+	notifyURL, err := url.Parse(callbackAddress + "/api/token-plan/epay/notify")
+	if err != nil || notifyURL.Host == "" || (notifyURL.Scheme != "http" && notifyURL.Scheme != "https") {
+		common.ApiErrorT(c, "Callback URL configuration error")
+		return
+	}
+	returnURL := *notifyURL
+	returnURL.Path = strings.TrimSuffix(returnURL.Path, "/notify") + "/return"
+	tradeNo := fmt.Sprintf("TPUSR%dNO%s", userId, common.GetUUID())
+	order, paidPlan, err := model.CreateTokenPlanOrder(userId, req.PlanId, tradeNo, req.PaymentMethod)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	key := token.Key
-	if c.GetBool("use_access_token") && !c.GetBool("access_token_legacy") && !service.AccessTokenScopeGranted(c.GetStringSlice("access_token_scopes"), "api_key:reveal") {
-		key = ""
+	uri, params, err := client.Purchase(&epay.PurchaseArgs{
+		Type: req.PaymentMethod, ServiceTradeNo: order.TradeNo,
+		Name: "TOKEN PLAN: " + strings.ReplaceAll(paidPlan.Title, "&", "＆"), Money: strconv.FormatFloat(order.Money, 'f', 2, 64),
+		Device: epay.PC, NotifyUrl: notifyURL, ReturnUrl: &returnURL,
+	})
+	if err != nil {
+		if closeErr := model.CloseUnpaidTokenPlanOrder(order.TradeNo); closeErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("TOKEN PLAN checkout cleanup failed for %s: %v", order.TradeNo, closeErr))
+		}
+		common.ApiErrorT(c, "Failed to start payment")
+		return
 	}
-	common.ApiSuccess(c, gin.H{
-		"subscription": sub,
-		"key":          key,
+	c.JSON(http.StatusOK, gin.H{
+		"success": true, "message": "success", "data": params, "url": uri,
 	})
 }
 

@@ -7465,6 +7465,21 @@
     "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).": "0 means every request is eligible. Enter a plain number, e.g. 500000 (not 500K).",
     "Throttling not synced to {{count}} subscriber(s)": "Throttling not synced to {{count}} subscriber(s)",
     "Disabled plans stay visible to existing subscribers but cannot be purchased.": "Disabled plans stay visible to existing subscribers but cannot be purchased.",
-    "This plan has no available group for your account": "This plan has no available group for your account"
+    "This plan has no available group for your account": "This plan has no available group for your account",
+    "EPay only supports CNY plans": "EPay only supports CNY plans",
+    "EPay plan prices must use at most two decimal places": "EPay plan prices must use at most two decimal places",
+    "TOKEN PLAN downgrades are not supported while the current plan is active": "TOKEN PLAN downgrades are not supported while the current plan is active",
+    "TOKEN PLAN activates after payment is confirmed": "TOKEN PLAN activates after payment is confirmed",
+    "Payment could not be confirmed. If charged, contact the administrator with your order number.": "Payment could not be confirmed. If charged, contact the administrator with your order number.",
+    "Payment is pending. Refresh this page after completing payment.": "Payment is pending. Refresh this page after completing payment.",
+    "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.": "Payment received. Your TOKEN PLAN is awaiting activation. Please contact the administrator with your order number.",
+    "Paid orders awaiting activation": "Paid orders awaiting activation",
+    "Activation failure reason": "Activation failure reason",
+    "Retry activation": "Retry activation",
+    "Failed to load payment issues": "Failed to load payment issues",
+    "No orders awaiting activation": "No orders awaiting activation",
+    "TOKEN PLAN activation could not be completed. Check the payment issue details.": "TOKEN PLAN activation could not be completed. Check the payment issue details.",
+    "Order number": "Order number",
+    "Payment time": "Payment time"
   }
 }

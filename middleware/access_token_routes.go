@@ -125,9 +125,12 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/api-router.go: /api/subscription
 	"GET /api/token-plan/plans":                          accessTokenScopeRule("wallet:read"),
 	"GET /api/token-plan/self":                           accessTokenScopeRule("api_key:reveal"),
+	"GET /api/token-plan/payment-issues":                 accessTokenScopeRule("wallet:read"),
 	"POST /api/token-plan/purchase":                      accessTokenScopeRule("wallet:write"),
 	"POST /api/token-plan/key/reset":                     accessTokenScopeRule("api_key:write"),
 	"GET /api/token-plan/admin/plans":                    accessTokenScopeRule("billing:read"),
+	"GET /api/token-plan/admin/payment-issues":           accessTokenScopeRule("billing:read"),
+	"POST /api/token-plan/admin/orders/:trade_no/retry":  accessTokenScopeRule("billing:write"),
 	"POST /api/token-plan/admin/plans":                   accessTokenScopeRule("billing:write"),
 	"PUT /api/token-plan/admin/plans/:id":                accessTokenScopeRule("billing:write"),
 	"DELETE /api/token-plan/admin/plans/:id":             accessTokenScopeRule("billing:write"),
